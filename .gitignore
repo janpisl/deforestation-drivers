@@ -1,0 +1,17 @@
+
+# Ignore pickles
+*.pkl
+**/*.pkl
+
+
+.vscode/*
+
+__pycache__/
+*.pyc
+
+wandb/
+
+models/
+
+.DS_Store
+
