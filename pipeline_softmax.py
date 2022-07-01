@@ -11,6 +11,15 @@ from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_sc
 from dataset import GeoWikiDataset
 from resnet18 import ResNet18
 
+classes = ['Subsistence agriculture', 'Managed forest/forestry',
+       'Pasture', 'Roads/trails/buildings',
+       'Other natural disturbances/No tree-loss driver',
+       'Commercial agriculture', 'Wildfire (disturbance)',
+       'Commercial oil palm or other palm plantations',
+       'Mining and crude oil extraction']
+
+
+
 image_transform = torch.nn.Sequential(
     transforms.CenterCrop(32),
     transforms.Normalize((8472.0, 9534.1, 9378.7, 17898.8), (313.3, 431.8,  644.0, 1335.2)),
@@ -111,16 +120,18 @@ def compute_f1_score(dataloader, net, threshold=0.5):
 
 
 if __name__ == '__main__':
-    
-    #controls = pd.read_csv('data/ILUC_controls_labels.csv')
-    #campaign = pd.read_csv('data/ILUC_campaign_labels.csv')
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     annotations_path = 'data/controls_labels_processed.csv'
     images_path = 'data/controls_L8_examples/'
 
-    nb_epochs, batch_size =  5, 32
+    # Using these weights in loss function results in poor performance, not sure why
+    controls_class_counts = 1023, 254, 308, 53, 76, 104, 16, 139, 19
+    weights_unnorm = torch.Tensor([1/i for i in controls_class_counts]).to(device)
+    weights = weights_unnorm/weights_unnorm.mean()
+
+    nb_epochs, batch_size =  10, 32
     weighted_loss = True
 
     torch.manual_seed(420)
@@ -134,23 +145,15 @@ if __name__ == '__main__':
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
-    #net = Net()
-    #number_of_params = sum(p.numel() for p in net.parameters())
-    net = ResNet18().to(device)
+    net = ResNet18(output_sigmoid=False).to(device)
     optimizer = torch.optim.Adam(net.parameters())
-    
-    if weighted_loss:
-        
-        loss_func = torch.nn.BCELoss(reduction='none')
-        criterion = partial(weighted_loss_function, loss_func)
-    else:
-        criterion = torch.nn.BCELoss()
 
+    criterion = torch.nn.CrossEntropyLoss(weight=weights)
 
-    '''wandb.init(project='geowiki_1', 
+    wandb.init(project='geowiki_1', 
             entity='janpisl')
 
-    wandb.watch(net, log='all')'''
+    wandb.watch(net, log='all')
     
 
     for epoch in range(nb_epochs):
@@ -159,7 +162,8 @@ if __name__ == '__main__':
             inputs, targets = inputs.to(device), targets.to(device)
             output = net(inputs)
             output = output.to(device)
-            loss = criterion(output, targets.float())
+            targets = targets/targets.sum(axis=1, keepdims=True).float()
+            loss = criterion(output, targets)
             epoch_loss += loss.item()
             optimizer.zero_grad() 
             loss.backward()
@@ -167,21 +171,30 @@ if __name__ == '__main__':
         
         with torch.no_grad():
             eval_loss = compute_eval_loss(test_dataloader, net, criterion)
+            epoch_loss, eval_loss = epoch_loss*0.2, eval_loss*0.8
+            print("Train loss: ", epoch_loss, " Val loss: ", eval_loss)
 
-            print("Train loss: ", epoch_loss*0.2, " Val loss: ", eval_loss*0.8)
-            
-            '''wandb.log({
+            train_stats_per_class = compute_f1_score(train_dataloader, net)
+            val_stats_per_class = compute_f1_score(test_dataloader, net)
+
+            train_f1_scores = dict(zip(classes, train_stats_per_class))
+            train_f1_scores = {'Train -' + k: v for k,v in train_f1_scores.items()}
+
+            val_f1_scores = dict(zip(classes, val_stats_per_class))
+            val_f1_scores = {'Validation - ' + k: v for k,v in val_f1_scores.items()}           
+
+            wandb.log({
                     "train_loss": epoch_loss,
                     "validation loss": eval_loss,
                     #"output": wandb.Image(output[0]),
                     #"target": wandb.Image(targets[0]),
+                    **train_f1_scores,
+                    **val_f1_scores
 
-            })'''
+            })
     
     with torch.no_grad():
         train_stats_per_class = compute_f1_score(train_dataloader, net)
         val_stats_per_class = compute_f1_score(test_dataloader, net)
 
-    pdb.set_trace()
-    print()
 
