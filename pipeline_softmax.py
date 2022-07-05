@@ -100,7 +100,8 @@ def compute_f1_score(dataloader, net, threshold=0.5):
         inputs, targets = inputs.to(device), targets.to(device)
         output = net(inputs) 
         output = output.to(device)
-
+        print("the below doesn't make sense now with softmax and multiple classes")
+        pdb.set_trace()
         #Set logits over threshold to 0
         output[output >= threshold] = 1
         output[output < threshold] = 0
@@ -123,15 +124,15 @@ if __name__ == '__main__':
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    annotations_path = 'data/controls_labels_processed.csv'
-    images_path = 'data/controls_L8_examples/'
+    annotations_path = 'data/campaign_labels_processed_1_7.csv'
+    images_path = 'data/campaign_L8_examples/'
 
     # Using these weights in loss function results in poor performance, not sure why
-    controls_class_counts = 1023, 254, 308, 53, 76, 104, 16, 139, 19
-    weights_unnorm = torch.Tensor([1/i for i in controls_class_counts]).to(device)
-    weights = weights_unnorm/weights_unnorm.mean()
+    #controls_class_counts = 1023, 254, 308, 53, 76, 104, 16, 139, 19
+    #weights_unnorm = torch.Tensor([1/i for i in controls_class_counts]).to(device)
+    #weights = weights_unnorm/weights_unnorm.mean()
 
-    nb_epochs, batch_size =  10, 32
+    nb_epochs, batch_size =  10, 8
     weighted_loss = True
 
     torch.manual_seed(420)
@@ -148,7 +149,7 @@ if __name__ == '__main__':
     net = ResNet18(output_sigmoid=False).to(device)
     optimizer = torch.optim.Adam(net.parameters())
 
-    criterion = torch.nn.CrossEntropyLoss(weight=weights)
+    criterion = torch.nn.CrossEntropyLoss()
 
     wandb.init(project='geowiki_1', 
             entity='janpisl')
@@ -162,6 +163,7 @@ if __name__ == '__main__':
             inputs, targets = inputs.to(device), targets.to(device)
             output = net(inputs)
             output = output.to(device)
+            pdb.set_trace()
             targets = targets/targets.sum(axis=1, keepdims=True).float()
             loss = criterion(output, targets)
             epoch_loss += loss.item()
