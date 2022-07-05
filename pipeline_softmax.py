@@ -1,6 +1,6 @@
 import pdb
 
-
+import numpy as np
 import torch
 from torchvision import transforms
 from torch.utils.data import DataLoader
@@ -100,18 +100,18 @@ def compute_f1_score(dataloader, net, threshold=0.5):
         inputs, targets = inputs.to(device), targets.to(device)
         output = net(inputs) 
         output = output.to(device)
-        print("the below doesn't make sense now with softmax and multiple classes")
-        pdb.set_trace()
-        #Set logits over threshold to 0
-        output[output >= threshold] = 1
-        output[output < threshold] = 0
+        assert torch.all(targets.sum(axis=1)) == 1, 'There are multiple classes -> this evaluation doesnt make sense' 
+        out = torch.nn.functional.softmax(output, dim=1)
+        output_indices = torch.argmax(out, dim=1)
+        out[np.arange(len(output_indices)), output_indices] = 1
+        out[out != 1] = 0
 
-        all_outputs.append(output)
+        all_outputs.append(out)
         all_targets.append(targets)
         
     outputs = torch.concat(all_outputs).cpu()
     targets = torch.concat(all_targets).cpu()
-
+    
     f1_scores = []
     for i in range(9):
         class_f1_score = f1_score(targets[:,i],outputs[:,i])
@@ -124,8 +124,8 @@ if __name__ == '__main__':
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    annotations_path = 'data/campaign_labels_processed_1_7.csv'
-    images_path = 'data/campaign_L8_examples/'
+    annotations_path = 'data/controls_labels_processed.csv'
+    images_path = 'data/controls_L8_examples/'
 
     # Using these weights in loss function results in poor performance, not sure why
     #controls_class_counts = 1023, 254, 308, 53, 76, 104, 16, 139, 19
@@ -163,7 +163,6 @@ if __name__ == '__main__':
             inputs, targets = inputs.to(device), targets.to(device)
             output = net(inputs)
             output = output.to(device)
-            pdb.set_trace()
             targets = targets/targets.sum(axis=1, keepdims=True).float()
             loss = criterion(output, targets)
             epoch_loss += loss.item()
