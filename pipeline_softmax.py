@@ -1,4 +1,14 @@
+'''
+Example of use:
+python pipeline_softmax.py \
+    --annotations_path data/tmp/annotations_with_majority_class.csv \
+    --image_folder data/tmp/medians/ \
+    --batch_size 4
+    --wandb
+'''
+
 import pdb
+import argparse
 
 import numpy as np
 import torch
@@ -10,6 +20,7 @@ from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_sc
 
 from dataset import GeoWikiDataset
 from resnet18 import ResNet18
+from get_means_stds import get_means_stds
 
 classes = ['Subsistence agriculture', 'Managed forest/forestry',
        'Pasture', 'Roads/trails/buildings',
@@ -20,11 +31,22 @@ classes = ['Subsistence agriculture', 'Managed forest/forestry',
 
 
 
-image_transform = torch.nn.Sequential(
-    transforms.CenterCrop(32),
-    transforms.Normalize((8472.0, 9534.1, 9378.7, 17898.8), (313.3, 431.8,  644.0, 1335.2)),
-)
 
+
+def get_image_transform(folder, cropsize=32):
+
+    #skip this to save time in development
+    #means, stds = get_means_stds(folder)
+
+    means = [21.08917549,  26.82532432,  50.31721194,  46.70581121, 224.1870091, 162.03204172,  88.59852001]
+    stds = [6.85905351,  7.88942854, 10.88926628, 15.86582499, 23.3733194, 32.04417448, 26.91564416]
+
+    return torch.nn.Sequential(
+        transforms.CenterCrop(cropsize),
+        transforms.Normalize(means, stds),
+    )
+
+    
 
 def compute_weights(labels):
     """Compute weights to be used in loss function.
@@ -44,28 +66,6 @@ def compute_weights(labels):
     return weights
 
 
-def weighted_loss_function(loss_func, output, targets):
-    """Compute weighted loss. Each class has a weight equivalent to the
-    number of votes, except if there are 0 votes, the weight is 1. All weights
-    are then normalized so that they sum to 1.
-
-    Args:
-        output (Tensor): output of model
-        targets (dict): 
-        loss_func (function): loss function to be used
-
-    Returns:
-        float: loss (scalar)
-    """
-    labels_mask = targets.clone()
-    labels_mask[labels_mask > 0] = 1
-
-    loss_array = loss_func(output, labels_mask.float())
-    weights = compute_weights(targets)
-    loss = (weights*loss_array).mean()
-
-    return loss
-
 
 def compute_eval_loss(dataloader, net, criterion):
     """Given dataloader, model and loss function, compute loss.
@@ -83,7 +83,7 @@ def compute_eval_loss(dataloader, net, criterion):
         inputs, targets = inputs.to(device), targets.to(device)
         output = net(inputs)
         output = output.to(device)
-
+        targets = targets/targets.sum(axis=1, keepdims=True).float()
         loss = criterion(output, targets.float())
 
         test_loss += loss.item()
@@ -91,7 +91,7 @@ def compute_eval_loss(dataloader, net, criterion):
     return test_loss
 
 
-def compute_f1_score(dataloader, net, threshold=0.5):
+def compute_f1_score(dataloader, net):
     """Compute f1 score
     """
     all_outputs = []
@@ -100,6 +100,8 @@ def compute_f1_score(dataloader, net, threshold=0.5):
         inputs, targets = inputs.to(device), targets.to(device)
         output = net(inputs) 
         output = output.to(device)
+        pdb.set_trace()
+        print('the assert statement below should - but doesnt - sometime fail; there must be some bug')
         assert torch.all(targets.sum(axis=1)) == 1, 'There are multiple classes -> this evaluation doesnt make sense' 
         out = torch.nn.functional.softmax(output, dim=1)
         output_indices = torch.argmax(out, dim=1)
@@ -112,6 +114,11 @@ def compute_f1_score(dataloader, net, threshold=0.5):
     outputs = torch.concat(all_outputs).cpu()
     targets = torch.concat(all_targets).cpu()
     
+    #strict f1 score - only the most voted class counts as correct
+    targets = targets - targets.max(axis=1, keepdims=True).values
+    targets[targets == 0] = 1
+    targets[targets < 1] = 0
+
     f1_scores = []
     for i in range(9):
         class_f1_score = f1_score(targets[:,i],outputs[:,i])
@@ -122,22 +129,39 @@ def compute_f1_score(dataloader, net, threshold=0.5):
 
 if __name__ == '__main__':
 
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--annotations_path', type=str)
+    parser.add_argument('--image_folder', type=str)
+
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--wandb', action=argparse.BooleanOptionalAction)    
+
+    args = parser.parse_args()
+
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    annotations_path = 'data/controls_labels_processed.csv'
-    images_path = 'data/controls_L8_examples/'
+    annotations_path = args.annotations_path
+    images_path = args.image_folder
 
-    # Using these weights in loss function results in poor performance, not sure why
+    # Using  weights in loss function results in poor performance, not sure why
     #controls_class_counts = 1023, 254, 308, 53, 76, 104, 16, 139, 19
     #weights_unnorm = torch.Tensor([1/i for i in controls_class_counts]).to(device)
     #weights = weights_unnorm/weights_unnorm.mean()
 
-    nb_epochs, batch_size =  10, 8
-    weighted_loss = True
+    batch_size = args.batch_size
 
     torch.manual_seed(420)
 
-    full_dataset = GeoWikiDataset(annotations_file=annotations_path, img_dir=images_path, transform=image_transform)
+    image_transform = get_image_transform(images_path)
+
+    full_dataset = GeoWikiDataset(
+        annotations_file=annotations_path, 
+        img_dir=images_path, 
+        drop_rows_with_missing_file=True,
+        transform=image_transform)
 
     train_size = int(0.8 * len(full_dataset))
     test_size = len(full_dataset) - train_size
@@ -147,19 +171,29 @@ if __name__ == '__main__':
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     net = ResNet18(output_sigmoid=False).to(device)
-    optimizer = torch.optim.Adam(net.parameters())
 
+    optimizer = torch.optim.Adam(net.parameters())
     criterion = torch.nn.CrossEntropyLoss()
 
-    wandb.init(project='geowiki_1', 
-            entity='janpisl')
+    if args.wandb:
+        parameters = {
+            'batch_size': batch_size,
+            'epochs': args.epochs,
+            'dataset_size': len(train_dataset)
+        }
 
-    wandb.watch(net, log='all')
+        wandb.init(project='geowiki_1', 
+                entity='janpisl', config=parameters)
+
+        wandb.watch(net, log='all')
     
 
-    for epoch in range(nb_epochs):
+    for epoch in range(args.epochs):
         epoch_loss = 0
         for inputs, targets in train_dataloader:
+            #just to train on a single batch to see what happens
+            if epoch_loss != 0:
+                continue
             inputs, targets = inputs.to(device), targets.to(device)
             output = net(inputs)
             output = output.to(device)
@@ -180,19 +214,27 @@ if __name__ == '__main__':
 
             train_f1_scores = dict(zip(classes, train_stats_per_class))
             train_f1_scores = {'Train -' + k: v for k,v in train_f1_scores.items()}
+            
 
             val_f1_scores = dict(zip(classes, val_stats_per_class))
-            val_f1_scores = {'Validation - ' + k: v for k,v in val_f1_scores.items()}           
+            val_f1_scores = {'Validation - ' + k: v for k,v in val_f1_scores.items()}         
 
-            wandb.log({
-                    "train_loss": epoch_loss,
-                    "validation loss": eval_loss,
-                    #"output": wandb.Image(output[0]),
-                    #"target": wandb.Image(targets[0]),
-                    **train_f1_scores,
-                    **val_f1_scores
+            avg_f1_score_train = sum(train_stats_per_class)/len(train_stats_per_class)
+            avg_f1_score_val = sum(val_stats_per_class)/len(val_stats_per_class)  
+            print(f'Average f1 score: train: {avg_f1_score_train}, validation: {avg_f1_score_val}')
 
-            })
+            if args.wandb:
+                wandb.log({
+                        "train_loss": epoch_loss,
+                        "validation loss": eval_loss,
+                        "Average f1 score (train)":avg_f1_score_train,
+                        "Average f1 score (val)":avg_f1_score_val,
+                        #"output": wandb.Image(output[0]),
+                        #"target": wandb.Image(targets[0]),
+                        **train_f1_scores,
+                        **val_f1_scores
+
+                })
     
     with torch.no_grad():
         train_stats_per_class = compute_f1_score(train_dataloader, net)

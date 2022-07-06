@@ -40,11 +40,11 @@ class ResidualBlock(nn.Module):
 
 
 class ResNet18(nn.Module):
-    def __init__(self):
+    def __init__(self, output_sigmoid):
         super(ResNet18,self).__init__()
         
         self.block1 = nn.Sequential(
-            nn.Conv2d(4,64,kernel_size=2,stride=2,padding=3,bias=False),
+            nn.Conv2d(7,64,kernel_size=2,stride=2,padding=3,bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(True)
         )
@@ -60,13 +60,12 @@ class ResNet18(nn.Module):
             ResidualBlock(256,256,2)
         )
         
-        
         self.avgpool = nn.AvgPool2d(2)
-
-        # consonant_diacritic
         self.fc1 = nn.Linear(1024,9)
 
-        self.sigmoid = nn.Sigmoid()
+        self.output_sigmoid = output_sigmoid
+        if self.output_sigmoid:
+            self.sigmoid = nn.Sigmoid()
         
     def forward(self,x):
         x = self.block1(x)
@@ -77,4 +76,8 @@ class ResNet18(nn.Module):
 
         x = self.fc1(x)
 
-        return self.sigmoid(x)
+        if self.output_sigmoid:
+            x = self.sigmoid(x)
+
+        return x
+
