@@ -277,8 +277,16 @@ def filter_patches_by_size(patches):
     return filtered_patches
 
 def get_time_periods(start_date, end_date, period):
+    """Generate a list of periods (each period is a tuple of dates).
 
-    pdb.set_trace()
+    Args:
+        start_date (str): in the form of YYYY-MM-DD
+        end_date (str):  in the form of YYYY-MM-DD
+        period (int): length of one period in months
+
+    Returns:
+        list: list of tuples (start_date, end_date) for each period
+    """
     start = date(*[int(i) for i in start_date.split('-')]) 
     end = date(*[int(i) for i in end_date.split('-')])
     
@@ -291,6 +299,30 @@ def get_time_periods(start_date, end_date, period):
         start += relativedelta(months=+period_length_months)
 
     return periods
+
+
+def compute_median(patches):
+    """Compute median from provided images; If images have different 
+    size, only compute median from a subset of images that have the same
+    dimension.
+
+    Args:
+        patches (list): list of dicts; each dict['raster'] is a np.array of W*H*C
+
+    Returns:
+        np.array: nanmedian of patches; shape W*H*C
+    """
+    try:
+        all_patches = np.array([np.concatenate([v for k, v in patch['raster'].items()],axis=2) for patch in patches]).astype('float')
+    except ValueError: #Some patches have different shapes and therefore cannot be concatenated
+        filtered_patches = filter_patches_by_size(patches)
+        #Use only the filtered patches that agree in size
+        all_patches = np.array([np.concatenate([v for k, v in patch['raster'].items()],axis=2) for patch in filtered_patches]).astype('float')
+    
+    all_patches[np.all(all_patches == 0, axis = 3)] = np.nan
+    median = np.rint(np.nanmedian(all_patches, axis=0)).astype('uint8')    
+
+    return median
 
 
 class Counter:
@@ -339,9 +371,7 @@ if __name__ == '__main__':
 
     bands = BANDS_LANDSAT
 
-    time_periods = get_time_periods(args.start_date, args.end_date, args.period_length_monts)
-
-
+    time_periods = get_time_periods(args.start_date, args.end_date, args.period_length_months)
 
     out_folder_median = os.path.join(args.save_path, 'medians')
     os.makedirs(out_folder_median, exist_ok=True)
@@ -351,11 +381,11 @@ if __name__ == '__main__':
 
     def worker(idx):
         try:
-            patches = get_patches_for_location(collection, sampler, periods, sensor, radius=buffer, bands=bands, debug=args.debug)
+            patches = get_patches_for_location(collection, sampler, time_periods, sensor, radius=buffer, bands=bands, debug=args.debug)
             sampleid = sampler.points.iloc[idx].sampleid
             location_path = os.path.join(args.save_path, f'{sampleid}')
             os.makedirs(location_path, exist_ok=True)
-            for patches_in_period, period in zip(patches, periods):
+            for patches_in_period, period in zip(patches, time_periods):
                 period_str = period[0] + '_' + period[1]
                 out_folder = os.path.join(location_path, period_str)
                 os.makedirs(out_folder, exist_ok=True)
@@ -366,20 +396,13 @@ if __name__ == '__main__':
                         metadata=patch['metadata'],
                         path=out_folder,
                     )
-                try:
-                    all_patches = np.array([np.concatenate([v for k, v in patch['raster'].items()],axis=2) for patch in patches_in_period]).astype('float')
-                except ValueError: #Some patches have different shapes and therefore cannot be concatenated
-                    filtered_patches = filter_patches_by_size(patches_in_period)
-                    #Compute the median only from those filtered patches
-                    all_patches = np.array([np.concatenate([v for k, v in patch['raster'].items()],axis=2) for patch in filtered_patches]).astype('float')
-                
-                all_patches[np.all(all_patches == 0, axis = 3)] = np.nan
-                new_median = np.rint(np.nanmedian(all_patches, axis=0)).astype('uint8')
-                filename = {'system:index': f'{sampleid}_{period_str}'}
+                                
+                median = compute_median(patches_in_period)
+
                 save_patch(
-                    raster=new_median,
+                    raster=median,
                     coords=patch['coords'],
-                    metadata=filename,
+                    metadata={'system:index': f'{sampleid}_{period_str}'},
                     path=out_folder_median,
                 )
 
