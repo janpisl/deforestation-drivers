@@ -1,9 +1,11 @@
 '''
+
+
 Example of use:
 
 python my_seco_download.py  --save_path data/seco_campaign_landsat\
     --sensor L8\
-    --sample_points_path campaign_locations_with_most_voted_class.shp\
+    --sample_points_path data/campaign_locations_with_most_voted_class.shp\
     --num_workers 32
 
 '''
@@ -320,10 +322,11 @@ if __name__ == '__main__':
     #if period_length != '6M':
     #    raise NotImplementedError("Only 6m period supported at the moment.")
     periods = []
+    months = 12
 
     while start < end:
-        periods.append((date2str(start), date2str(start+ relativedelta(months=+6))))
-        start += relativedelta(months=+12)
+        periods.append((date2str(start), date2str(start+ relativedelta(months=+months))))
+        start += relativedelta(months=+months)
 
     out_folder_median = os.path.join(args.save_path, 'medians')
     os.makedirs(out_folder_median, exist_ok=True)
