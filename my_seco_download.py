@@ -1,9 +1,11 @@
 '''
+
+
 Example of use:
 
 python my_seco_download.py  --save_path data/seco_campaign_landsat\
     --sensor L8\
-    --sample_points_path data/geowiki/ILUC.shp\
+    --sample_points_path data/campaign_locations_with_most_voted_class.shp\
     --num_workers 32
 
 '''
@@ -248,6 +250,30 @@ def save_patch(raster, coords, metadata, path):
     save_geotiff(img, coords, os.path.join(path, f'{patch_id}.tif'))
 
 
+def filter_patches_by_size(patches):
+    """If list of patches contains patches of different size, it 
+    cannot be concatenated. Here, given a list of patches, the most
+    common shape is found and a list of patches of that size only
+    is returned.
+
+    Args:
+        patches (list)
+
+    Returns:
+        list: filtered patches
+    """
+    #Get the name of first band (it is assumed all bands have the same shape)
+    band_name = next(iter(patches[0]['raster'].items()))[0]
+    #Find the most common shape
+    shapes = [patch['raster'][band_name].shape for patch in patches]
+    most_common = max(set(shapes), key=shapes.count)
+    #Keep only those patches with the most common shape
+    filtered_patches = [patch for patch in patches if patch['raster'][band_name].shape == most_common]
+
+    return filtered_patches
+
+
+
 class Counter:
 
     def __init__(self, start=0):
@@ -284,22 +310,23 @@ if __name__ == '__main__':
     assert sensor in ['S2', 'L7', 'L8'], f"Implemented sensors are 'S2', 'L7', 'L8', not {sensor}"
     collection = get_collection(sensor=sensor, cloud_pct=args.cloud_pct)
 
-    sampler = ShapeFileSampler('data/geowiki/ILUC_controls.shp')
+    sampler = ShapeFileSampler(args.sample_points_path)
     start_index = sampler.index
     end_index = sampler.points.index[-1]
 
     bands = BANDS_LANDSAT
 
-    start = date(2019, 1, 1)
+    start = date(2020, 1, 1)
     end = date(2021, 1, 1)
-    period_length = '6M'
-    if period_length != '6M':
-        raise NotImplementedError("Only 6m period supported at the moment.")
+    #period_length = '6M'
+    #if period_length != '6M':
+    #    raise NotImplementedError("Only 6m period supported at the moment.")
     periods = []
+    months = 12
 
     while start < end:
-        periods.append((date2str(start), date2str(start+ relativedelta(months=+6))))
-        start += relativedelta(months=+6)
+        periods.append((date2str(start), date2str(start+ relativedelta(months=+months))))
+        start += relativedelta(months=+months)
 
     out_folder_median = os.path.join(args.save_path, 'medians')
     os.makedirs(out_folder_median, exist_ok=True)
@@ -324,16 +351,20 @@ if __name__ == '__main__':
                         metadata=patch['metadata'],
                         path=out_folder,
                     )
+                try:
+                    all_patches = np.array([np.concatenate([v for k, v in patch['raster'].items()],axis=2) for patch in patches_in_period]).astype('float')
+                except ValueError: #Some patches have different shapes and therefore cannot be concatenated
+                    filtered_patches = filter_patches_by_size(patches_in_period)
+                    #Compute the median only from those filtered patches
+                    all_patches = np.array([np.concatenate([v for k, v in patch['raster'].items()],axis=2) for patch in filtered_patches]).astype('float')
                 
-
-                all_patches = np.array([np.concatenate([v for k, v in patch['raster'].items()],axis=2) for patch in patches_in_period]).astype('float')
                 all_patches[np.all(all_patches == 0, axis = 3)] = np.nan
                 new_median = np.rint(np.nanmedian(all_patches, axis=0)).astype('uint8')
-                pseudo_metadata = {'system:index': f'{sampleid}_{period_str}'}
+                filename = {'system:index': f'{sampleid}_{period_str}'}
                 save_patch(
                     raster=new_median,
                     coords=patch['coords'],
-                    metadata=pseudo_metadata,
+                    metadata=filename,
                     path=out_folder_median,
                 )
 
@@ -341,7 +372,7 @@ if __name__ == '__main__':
             if count % args.log_freq == 0:
                 print(f'Downloaded {count} images in {time.time() - start_time:.3f}s.')
 
-        except ee.ee_exception.EEException as e:
+        except Exception as e:
             print(e)
 
 
