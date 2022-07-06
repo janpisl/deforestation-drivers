@@ -1,4 +1,7 @@
 '''
+This script downloads images according to given parameters and creates 
+a median from them.
+
 
 
 Example of use:
@@ -24,6 +27,7 @@ warnings.simplefilter('ignore', UserWarning)
 import pdb
 from dateutil.relativedelta import relativedelta
 
+import pandas as pd
 import ee
 import numpy as np
 import rasterio
@@ -238,7 +242,7 @@ def save_geotiff(img, coords, filename):
 
 
 def save_patch(raster, coords, metadata, path):
-
+    
     patch_id = metadata['system:index']
 
     try:
@@ -272,6 +276,21 @@ def filter_patches_by_size(patches):
 
     return filtered_patches
 
+def get_time_periods(start_date, end_date, period):
+
+    pdb.set_trace()
+    start = date(*[int(i) for i in start_date.split('-')]) 
+    end = date(*[int(i) for i in end_date.split('-')])
+    
+    period_length_months = int(period)
+
+    periods = []
+
+    while start < end:
+        periods.append((date2str(start), date2str(start+ relativedelta(months=+period_length_months))))
+        start += relativedelta(months=+period_length_months)
+
+    return periods
 
 
 class Counter:
@@ -295,11 +314,15 @@ if __name__ == '__main__':
     parser.add_argument('--log_freq', type=int, default=100)
 
     parser.add_argument('--num_workers', type=int, default=16)
-    parser.add_argument('--save_path', type=str, default='data/tmp/seco_folder')
+    parser.add_argument('--save_path', type=str,)
 
     parser.add_argument('--cloud_pct', type=int, default=50)
-    parser.add_argument('--sensor', type=str, default='S2')
+    parser.add_argument('--sensor', type=str)
     parser.add_argument('--buffer', type=int, default=1000)
+
+    parser.add_argument('--start_date', type=str, default='2020-01-01')
+    parser.add_argument('--end_date', type=str, default='2021-01-01')
+    parser.add_argument('--period_length_months', type=int, default=12)
 
     args = parser.parse_args()
 
@@ -316,17 +339,9 @@ if __name__ == '__main__':
 
     bands = BANDS_LANDSAT
 
-    start = date(2020, 1, 1)
-    end = date(2021, 1, 1)
-    #period_length = '6M'
-    #if period_length != '6M':
-    #    raise NotImplementedError("Only 6m period supported at the moment.")
-    periods = []
-    months = 12
+    time_periods = get_time_periods(args.start_date, args.end_date, args.period_length_monts)
 
-    while start < end:
-        periods.append((date2str(start), date2str(start+ relativedelta(months=+months))))
-        start += relativedelta(months=+months)
+
 
     out_folder_median = os.path.join(args.save_path, 'medians')
     os.makedirs(out_folder_median, exist_ok=True)
