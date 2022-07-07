@@ -96,7 +96,9 @@ class ShapeFileSampler(GeoSampler):
         if self.index > self.actual_started_index:
             with open(LAST_IDX_LOGFILE, 'w') as f:
                 f.write(str(self.index))
-        geom = self.points.iloc[self.index].geometry
+        point = self.points.iloc[self.index]
+        sampleid = point.sampleid
+        geom = point.geometry
         lon, lat = geom.x, geom.y
 
         if self.index % 100 == 0:
@@ -104,7 +106,7 @@ class ShapeFileSampler(GeoSampler):
             eta = elapsed_seconds / (self.index - self.actual_started_index + 1) * (self.end_index - self.start_index)
             print("index:", self.index, 'elapsed_time:', str(timedelta(seconds=elapsed_seconds)), 'estimated_remaining_time:',  str(timedelta(seconds=eta-elapsed_seconds)))
         self.index += 1
-        return [lon, lat]
+        return [lon, lat], sampleid
 
 
 
@@ -211,8 +213,7 @@ def date2str(date):
     return date.strftime('%Y-%m-%d')
 
 
-def get_patches_for_location(collection, sampler, periods, sensor, debug=False, **kwargs):
-    coords = sampler.sample_point()
+def get_patches_for_location(collection, coords, periods, sensor, debug=False, **kwargs):
     
     filtered_collections = [filter_collection(collection, coords, p) for p in periods]
     patches = [get_patches_for_period(coll, coords, sensor, **kwargs) for coll in filtered_collections]
@@ -381,8 +382,9 @@ if __name__ == '__main__':
 
     def worker(idx):
         try:
-            patches = get_patches_for_location(collection, sampler, time_periods, sensor, radius=buffer, bands=bands, debug=args.debug)
-            sampleid = sampler.points.iloc[idx].sampleid
+            coords, sampleid = sampler.sample_point()
+            patches = get_patches_for_location(collection, coords, time_periods, sensor, radius=buffer, bands=bands, debug=args.debug)
+            #sampleid = sampler.points.iloc[idx].sampleid
             location_path = os.path.join(args.save_path, f'{sampleid}')
             os.makedirs(location_path, exist_ok=True)
             for patches_in_period, period in zip(patches, time_periods):
