@@ -192,8 +192,8 @@ if __name__ == '__main__':
         epoch_loss = 0
         for inputs, targets in train_dataloader:
             #just to train on a single batch to see what happens
-            if epoch_loss != 0:
-                continue
+            #if epoch_loss != 0:
+            #    continue
             inputs, targets = inputs.to(device), targets.to(device)
             output = net(inputs)
             output = output.to(device)
