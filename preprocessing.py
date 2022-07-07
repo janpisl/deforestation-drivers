@@ -12,23 +12,6 @@ import pandas as pd
 import numpy as np
 
 
-#controls = pd.read_csv('data/ILUC_controls_labels.csv')
-campaign = pd.read_csv('data/ILUC_campaign_labels.csv')
-
-
-
-gdf = gpd.read_file('data/geowiki/ILUC.shp')
-
-try:
-    campaign = campaign.drop(['Unnamed: 0'], axis=1)
-except KeyError:
-    pass
-campaign = campaign.set_index('sampleid')
-
-# I add geometry to the DataFrame with labels.
-indexed_geoms = gdf[['sampleid', 'geometry']].drop_duplicates().set_index('sampleid')
-filtered_geoms = indexed_geoms.loc[campaign.index]
-campaing_processed = pd.concat([campaign, filtered_geoms], axis=1)
 
 
 def has_ambiguous_label(df):
@@ -49,17 +32,15 @@ def has_ambiguous_label(df):
     return df.most_votes == df.second_most_votes
 
 
-filtered = campaing_processed[~has_ambiguous_label(campaing_processed)]
 
-
-def drop_if_not_file_exists(dataframe, folder):
+def drop_if_not_file_exists(dataframe, folder, name_column='sampleid'):
 
     paths = []
     for i, row in dataframe.iterrows():
-        filename = f'{i}_2020_1.tif'
+        filename = f'{row[name_column]}.tif'
         paths.append(filename)
 
-    campaing_processed['filename'] = paths
+    dataframe['filename'] = paths
 
     drop_indices = []
     for index, row in dataframe.iterrows():
@@ -70,6 +51,30 @@ def drop_if_not_file_exists(dataframe, folder):
 
     return dataframe
 
-#folder = 'data/campaign_L8_examples'
-#filtered = drop_if_not_file_exists(campaing_processed, folder)
 
+
+
+if __name__ == '__main__':
+
+
+    #controls = pd.read_csv('data/ILUC_controls_labels.csv')
+    campaign = pd.read_csv('data/ILUC_campaign_labels.csv')
+
+
+    gdf = gpd.read_file('data/geowiki/ILUC.shp')
+
+    try:
+        campaign = campaign.drop(['Unnamed: 0'], axis=1)
+    except KeyError:
+        pass
+    campaign = campaign.set_index('sampleid')
+
+    # I add geometry to the DataFrame with labels.
+    indexed_geoms = gdf[['sampleid', 'geometry']].drop_duplicates().set_index('sampleid')
+    filtered_geoms = indexed_geoms.loc[campaign.index]
+    campaing_processed = pd.concat([campaign, filtered_geoms], axis=1)
+
+    #folder = 'data/campaign_L8_examples'
+    #filtered = drop_if_not_file_exists(campaing_processed, folder)
+
+    filtered = campaing_processed[~has_ambiguous_label(campaing_processed)]
