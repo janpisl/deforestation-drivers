@@ -10,6 +10,7 @@ import rasterio
 import os
 import pandas as pd
 import numpy as np
+from shapely.geometry import box
 
 
 
@@ -33,14 +34,19 @@ def has_ambiguous_label(df):
 
 
 
-def drop_if_not_file_exists(dataframe, folder, name_column='sampleid'):
-
+def get_file_names(dataframe, name_column):
     paths = []
     for i, row in dataframe.iterrows():
         filename = f'{row[name_column]}.tif'
         paths.append(filename)
 
-    dataframe['filename'] = paths
+    return paths
+
+def drop_if_not_file_exists(dataframe, folder, name_column='sampleid'):
+    size = len(dataframe)
+
+    if not 'filename' in dataframe.columns:
+        dataframe['filename'] = get_file_names(dataframe, name_column=name_column)
 
     drop_indices = []
     for index, row in dataframe.iterrows():
@@ -49,7 +55,70 @@ def drop_if_not_file_exists(dataframe, folder, name_column='sampleid'):
 
     dataframe = dataframe.drop(drop_indices)
 
+    print(f'Dropped {size - len(dataframe)} rows where the corresponding file was not found. Rows remaining: {len(dataframe)}')
+
     return dataframe
+
+
+
+def drop_if_missing_data(dataframe, folder, name_column='sampleid'):
+
+    size = len(dataframe)
+
+    if not 'filename' not in dataframe.columns:
+        dataframe['filename'] = get_file_names(dataframe, name_column=name_column)
+
+    drop_indices = []
+    for index, row in dataframe.iterrows():
+        file_path = os.path.join(folder, row.filename)
+        with rasterio.open(file_path) as src:
+            data = src.read()
+            if np.any(data.sum(axis=0) == 0):
+                drop_indices.append(index)  
+
+    dataframe = dataframe.drop(drop_indices)
+
+    print(f'Dropped {size - len(dataframe)} rows where the corresponding file had missing data. Rows remaining: {len(dataframe)}')
+
+    return dataframe
+
+
+
+
+def find_id_sindex(file_name, sindex, gdf):
+
+    with rasterio.open(file_name) as src:
+        bounds = src.bounds
+        geom = box(*bounds)
+
+    potential_indices = sindex.intersection(geom.bounds)
+    potential_matches = gdf.iloc[potential_indices]
+
+    return potential_matches.loc[potential_matches.intersects(geom)].sampleid.values[0]
+
+
+def fix_naming(image_folder, output_folder, gdf_labels_path='data/campaign_labels_processed.shp'):
+    """For each image in folder, get its extent, find which location is intersects with,
+    get the sampleid for that location and rename the image to f'{sampleid}.tif'
+
+    Args:
+        folder (str): path to folder with images to be renamed
+        gdf_labels_path (str): path to GDF with 'sampleid' and geometries. Defaults to 'data/campaign_labels_processed.shp'.
+    """
+    gdf_labels = gpd.read_file(gdf_labels_path)
+    os.makedirs(output_folder, exist_ok=True)
+    sindex = gdf_labels.sindex
+
+    files = [os.path.join(image_folder,f) for f in os.listdir(image_folder) if f.endswith('.tif')]
+
+    for file_path in files:
+
+        correct_index = find_id_sindex(file_path, sindex, gdf_labels)
+        new_name = os.path.join(output_folder, f'{correct_index}.tif')
+        
+        os.rename(file_path, new_name)
+
+
 
 
 
@@ -78,3 +147,11 @@ if __name__ == '__main__':
     #filtered = drop_if_not_file_exists(campaing_processed, folder)
 
     filtered = campaing_processed[~has_ambiguous_label(campaing_processed)]
+
+
+    folder = 'data/tmp/renamed_medians'
+    annotations = 'data/tmp/annotations_with_majority_class.csv'
+
+    img_labels = pd.read_csv(annotations)
+    x = drop_if_not_file_exists(img_labels, folder)
+    y = drop_if_missing_data(x, folder)
