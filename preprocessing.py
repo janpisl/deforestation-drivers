@@ -13,8 +13,6 @@ import numpy as np
 from shapely.geometry import box
 
 
-
-
 def has_ambiguous_label(df):
     """Identify and return boolean filter of rows where two or more classes
     have identical number of votes (ie. there is no unique class 
@@ -98,7 +96,7 @@ def find_id_sindex(file_name, sindex, gdf):
 
 
 def fix_naming(image_folder, output_folder, gdf_labels_path='data/campaign_labels_processed.shp'):
-    """For each image in folder, get its extent, find which location is intersects with,
+    """For each image in folder, get its extent, find which location it intersects with,
     get the sampleid for that location and rename the image to f'{sampleid}.tif'
 
     Args:
@@ -123,11 +121,14 @@ def fix_naming(image_folder, output_folder, gdf_labels_path='data/campaign_label
 
 
 
+
+
+
 if __name__ == '__main__':
 
 
     #controls = pd.read_csv('data/ILUC_controls_labels.csv')
-    campaign = pd.read_csv('data/ILUC_campaign_labels.csv')
+    '''campaign = pd.read_csv('data/ILUC_campaign_labels.csv')
 
 
     gdf = gpd.read_file('data/geowiki/ILUC.shp')
@@ -149,9 +150,19 @@ if __name__ == '__main__':
     filtered = campaing_processed[~has_ambiguous_label(campaing_processed)]
 
 
-    folder = 'data/tmp/renamed_medians'
+    folder = 'data/tmp/medians'
     annotations = 'data/tmp/annotations_with_majority_class.csv'
-
+    
     img_labels = pd.read_csv(annotations)
     x = drop_if_not_file_exists(img_labels, folder)
     y = drop_if_missing_data(x, folder)
+
+    folder = 'data/seco_campaign_landsat/medians'
+    out_folder = 'data/seco_campaign_landsat/medians_fixed_naming'
+    fix_naming(folder, out_folder)'''
+
+    labels = 'data/tmp/annotations_with_majority_class.csv'
+    counts = get_class_counts(pd.read_csv(labels))
+    pdb.set_trace()
+    print()
+
