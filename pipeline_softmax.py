@@ -2,8 +2,9 @@
 Example of use:
 python pipeline_softmax.py \
     --annotations_path data/tmp/annotations_with_majority_class.csv \
-    --image_folder data/tmp/medians/ \
-    --batch_size 4
+    --image_folder data/seco_campaign_landsat/medians_fixed_naming/ \
+    --batch_size 128\
+    --weighted_loss\
     --wandb
 '''
 
@@ -11,14 +12,16 @@ import pdb
 import argparse
 
 import numpy as np
+from preprocessing import drop_if_missing_data
 import torch
-from torchvision import transforms
 from torch.utils.data import DataLoader
 from functools import partial
+from utils import get_class_counts
 import wandb
 from sklearn.metrics import precision_score, recall_score, accuracy_score, f1_score
 
-from dataset import GeoWikiDataset
+from utils import get_class_counts, compute_eval_loss
+from dataset import GeoWikiDataset, get_image_transform
 from resnet18 import ResNet18
 from get_means_stds import get_means_stds
 
@@ -30,67 +33,6 @@ classes = ['Subsistence agriculture', 'Managed forest/forestry',
        'Mining and crude oil extraction']
 
 
-
-
-
-def get_image_transform(folder, cropsize=32):
-
-    #skip this to save time in development
-    #means, stds = get_means_stds(folder)
-
-    means = [21.08917549,  26.82532432,  50.31721194,  46.70581121, 224.1870091, 162.03204172,  88.59852001]
-    stds = [6.85905351,  7.88942854, 10.88926628, 15.86582499, 23.3733194, 32.04417448, 26.91564416]
-
-    return torch.nn.Sequential(
-        transforms.CenterCrop(cropsize),
-        transforms.Normalize(means, stds),
-    )
-
-    
-
-def compute_weights(labels):
-    """Compute weights to be used in loss function.
-    If x votes were cast for one answer,
-    assign it x-times higher weight.
-    Negative labels have base weight.
-
-    Args:
-        labels (Tensor): labels from geowiki dataset
-
-    Returns:
-        Tensor: weights
-    """
-    labels[labels == 0] = 1
-    weights = labels/labels.mean()
-
-    return weights
-
-
-
-def compute_eval_loss(dataloader, net, criterion):
-    """Given dataloader, model and loss function, compute loss.
-
-    Args:
-        dataloader (torch.utils.data.DataLoader): 
-        net (torch.nn.Module): 
-        criterion (function): loss function to be used
-
-    Returns:
-        float: loss (scalar)
-    """
-    test_loss = 0
-    for inputs, targets in dataloader:
-        inputs, targets = inputs.to(device), targets.to(device)
-        output = net(inputs)
-        output = output.to(device)
-        targets = targets/targets.sum(axis=1, keepdims=True).float()
-        loss = criterion(output, targets.float())
-
-        test_loss += loss.item()
-    
-    return test_loss
-
-
 def compute_f1_score(dataloader, net):
     """Compute f1 score
     """
@@ -100,9 +42,6 @@ def compute_f1_score(dataloader, net):
         inputs, targets = inputs.to(device), targets.to(device)
         output = net(inputs) 
         output = output.to(device)
-        pdb.set_trace()
-        print('the assert statement below should - but doesnt - sometime fail; there must be some bug')
-        assert torch.all(targets.sum(axis=1)) == 1, 'There are multiple classes -> this evaluation doesnt make sense' 
         out = torch.nn.functional.softmax(output, dim=1)
         output_indices = torch.argmax(out, dim=1)
         out[np.arange(len(output_indices)), output_indices] = 1
@@ -110,15 +49,20 @@ def compute_f1_score(dataloader, net):
 
         all_outputs.append(out)
         all_targets.append(targets)
-        
+
+
+    #The f1_score function didnt work with device='cuda'
     outputs = torch.concat(all_outputs).cpu()
-    targets = torch.concat(all_targets).cpu()
-    
+    targets = torch.concat(all_targets).cpu()   
+
     #strict f1 score - only the most voted class counts as correct
     targets = targets - targets.max(axis=1, keepdims=True).values
     targets[targets == 0] = 1
     targets[targets < 1] = 0
 
+    assert torch.all(targets.sum(axis=1) == 1), 'There are multiple classes -> this evaluation doesnt make sense' 
+
+    
     f1_scores = []
     for i in range(9):
         class_f1_score = f1_score(targets[:,i],outputs[:,i])
@@ -127,59 +71,55 @@ def compute_f1_score(dataloader, net):
     return f1_scores
 
 
-if __name__ == '__main__':
+def train(net, dataloader, criterion, optimizer, device):
+
+    epoch_loss = 0
+    count = 0
+    for inputs, targets in dataloader:
+        #just to train on a few batches to see what happens
+        #count+=1
+        #if count > 10:
+        #    break
+        inputs, targets = inputs.to(device), targets.to(device)
+        output = net(inputs)
+        output = output.to(device)
+        targets = targets/targets.sum(axis=1, keepdims=True).float()
+        loss = criterion(output, targets)
+        epoch_loss += loss.item()
+        optimizer.zero_grad() 
+        loss.backward()
+        optimizer.step()
+    
+    return epoch_loss
 
 
-    parser = argparse.ArgumentParser()
 
-    parser.add_argument('--annotations_path', type=str)
-    parser.add_argument('--image_folder', type=str)
+def main(train_dataset, test_dataset, weighted_loss, batch_size, epochs, lr, log_wandb):
+    print(f'Parameters: weighted loss {weighted_loss}, batch_size {batch_size}, lr {lr} ')
 
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--wandb', action=argparse.BooleanOptionalAction)    
-
-    args = parser.parse_args()
-
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    annotations_path = args.annotations_path
-    images_path = args.image_folder
-
-    # Using  weights in loss function results in poor performance, not sure why
-    #controls_class_counts = 1023, 254, 308, 53, 76, 104, 16, 139, 19
-    #weights_unnorm = torch.Tensor([1/i for i in controls_class_counts]).to(device)
-    #weights = weights_unnorm/weights_unnorm.mean()
-
-    batch_size = args.batch_size
-
-    torch.manual_seed(420)
-
-    image_transform = get_image_transform(images_path)
-
-    full_dataset = GeoWikiDataset(
-        annotations_file=annotations_path, 
-        img_dir=images_path, 
-        drop_rows_with_missing_file=True,
-        transform=image_transform)
-
-    train_size = int(0.8 * len(full_dataset))
-    test_size = len(full_dataset) - train_size
-    train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     net = ResNet18(output_sigmoid=False).to(device)
+    optimizer = torch.optim.Adam(net.parameters(), lr=lr)
+    
+    if weighted_loss:
+        #I think technically i should only use the train dataset to get class counts
+        class_counts = get_class_counts(full_dataset.img_labels)
+        weights_unnorm = torch.Tensor([1/i for i in class_counts]).to(device)
+        weights = weights_unnorm/weights_unnorm.mean()
+        criterion = torch.nn.CrossEntropyLoss(weight=weights)
+    else:
+        criterion = torch.nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.Adam(net.parameters())
-    criterion = torch.nn.CrossEntropyLoss()
-
-    if args.wandb:
+    if log_wandb:
         parameters = {
             'batch_size': batch_size,
-            'epochs': args.epochs,
-            'dataset_size': len(train_dataset)
+            'epochs': epochs,
+            'dataset_size': len(train_dataset),
+            'weighted loss': weighted_loss,
+            'learning rate': lr
         }
 
         wandb.init(project='geowiki_1', 
@@ -188,24 +128,14 @@ if __name__ == '__main__':
         wandb.watch(net, log='all')
     
 
-    for epoch in range(args.epochs):
-        epoch_loss = 0
-        for inputs, targets in train_dataloader:
-            #just to train on a single batch to see what happens
-            #if epoch_loss != 0:
-            #    continue
-            inputs, targets = inputs.to(device), targets.to(device)
-            output = net(inputs)
-            output = output.to(device)
-            targets = targets/targets.sum(axis=1, keepdims=True).float()
-            loss = criterion(output, targets)
-            epoch_loss += loss.item()
-            optimizer.zero_grad() 
-            loss.backward()
-            optimizer.step()
+    for epoch in range(epochs):
+
+        epoch_loss = train(net, train_dataloader,criterion, optimizer, device)
         
         with torch.no_grad():
-            eval_loss = compute_eval_loss(test_dataloader, net, criterion)
+            eval_loss = compute_eval_loss(test_dataloader, net, criterion, device)
+            
+            #Scaling losses based on the train/test split so they are comparable
             epoch_loss, eval_loss = epoch_loss*0.2, eval_loss*0.8
             print("Train loss: ", epoch_loss, " Val loss: ", eval_loss)
 
@@ -223,7 +153,7 @@ if __name__ == '__main__':
             avg_f1_score_val = sum(val_stats_per_class)/len(val_stats_per_class)  
             print(f'Average f1 score: train: {avg_f1_score_train}, validation: {avg_f1_score_val}')
 
-            if args.wandb:
+            if log_wandb:
                 wandb.log({
                         "train_loss": epoch_loss,
                         "validation loss": eval_loss,
@@ -235,9 +165,50 @@ if __name__ == '__main__':
                         **val_f1_scores
 
                 })
-    
-    with torch.no_grad():
-        train_stats_per_class = compute_f1_score(train_dataloader, net)
-        val_stats_per_class = compute_f1_score(test_dataloader, net)
+
+
+
+if __name__ == '__main__':
+
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--annotations_path', type=str)
+    parser.add_argument('--image_folder', type=str)
+
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--weighted_loss', action=argparse.BooleanOptionalAction)    
+    parser.add_argument('--wandb', action=argparse.BooleanOptionalAction)    
+
+    args = parser.parse_args()
+
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    annotations_path, images_path, weighted_loss, batch_size, epochs, log_wandb = args.annotations_path, args.image_folder, args.weighted_loss, args.batch_size, args.epochs, args.wandb
+
+    torch.manual_seed(420)
+
+    image_transform = get_image_transform(images_path)
+
+    full_dataset = GeoWikiDataset(
+        annotations_file=annotations_path, 
+        img_dir=images_path, 
+        drop_rows_with_missing_file=True,
+        #drop_rows_with_nan_data=True, #Drop row if any pixel in corresp. image has 0s across all bands
+        transform=image_transform)
+
+
+    train_size = int(0.8 * len(full_dataset))
+    test_size = len(full_dataset) - train_size
+    train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
+
+    for weighted_loss in [True, False]:
+        for batch_size in [32, 64, 128, 256]:
+            for lr in [0.0005, 0.001, 0.002]:
+                try:
+                    main(train_dataset, test_dataset, weighted_loss, batch_size, epochs, lr, log_wandb)
+                except Exception as e:
+                    print(e)
 
 
