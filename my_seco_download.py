@@ -39,6 +39,7 @@ import geopandas as gpd
 ALL_BANDS = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']
 RGB_BANDS = ['B4', 'B3', 'B2']
 BANDS_LANDSAT = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7']
+BANDS_10M_S2 = ['B2', 'B3', 'B4', 'B8']
 
 LAST_IDX_LOGFILE = "last_idx.txt"
 
@@ -370,7 +371,10 @@ if __name__ == '__main__':
     start_index = sampler.index
     end_index = sampler.points.index[-1]
 
-    bands = BANDS_LANDSAT
+    if sensor.startswith('L'):
+        bands = BANDS_LANDSAT
+    else:
+        bands = BANDS_10M_S2
 
     time_periods = get_time_periods(args.start_date, args.end_date, args.period_length_months)
 
@@ -413,6 +417,7 @@ if __name__ == '__main__':
                 print(f'Downloaded {count} images in {time.time() - start_time:.3f}s.')
 
         except Exception as e:
+            print(f'Failed for sampleid {sampleid} with error:')
             print(e)
 
 
