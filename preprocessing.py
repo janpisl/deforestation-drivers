@@ -23,7 +23,7 @@ def has_ambiguous_label(df):
         df (pd.DataFrame): df with 'sampleid' and classes with votes and 'geometry'
 
     Returns:
-        pd.DataFrame: contains rows with
+        pd.Series: rows with two or more top voted answers are set to True
     """
     df = df.set_index('sampleid')
     df['most_votes'] = df.max(axis=1)
@@ -40,12 +40,12 @@ def has_single_label(df):
         df (pd.DataFrame): df with 'sampleid' and classes with votes and 'geometry'
 
     Returns:
-        pd.DataFrame: contains rows where all votes are for the same class
+        pd.Series: rows where all votes are for the same class are True
     """
     df = df.set_index('sampleid')
-    df['second_most_votes'] = df.drop(['most_votes', 'geometry'], axis=1, errors='ignore').apply(lambda row: row.nlargest(2).values[-1],axis=1)
-    
-    return df.reset_index().drop('sampleid', axis=1, errors='ignore').second_most_votes > 0
+    df['second_most_votes'] = df.drop(['most_votes', 'geometry', 'filename'], axis=1, errors='ignore').apply(lambda row: row.nlargest(2).values[-1],axis=1)
+
+    return df.reset_index().drop('sampleid', axis=1, errors='ignore').second_most_votes == 0
 
 
 
@@ -57,47 +57,36 @@ def get_file_names(dataframe, name_column):
 
     return paths
 
-def drop_if_not_file_exists(dataframe, folder, name_column='sampleid'):
-    size = len(dataframe)
+
+def file_exists(dataframe, folder, name_column='sampleid'):
 
     if not 'filename' in dataframe.columns:
         dataframe['filename'] = get_file_names(dataframe, name_column=name_column)
 
-    drop_indices = []
-    for index, row in dataframe.iterrows():
-        if not os.path.isfile(os.path.join(folder, row.filename)):
-            drop_indices.append(index)
-
-    dataframe = dataframe.drop(drop_indices)
-
-    print(f'Dropped {size - len(dataframe)} rows where the corresponding file was not found. Rows remaining: {len(dataframe)}')
-
-    return dataframe
+    return dataframe.filename.apply(lambda filename: os.path.isfile(os.path.join(folder, filename)))
 
 
 
-def drop_if_missing_data(dataframe, folder, name_column='sampleid'):
+def has_missing_data(dataframe, folder, name_column='sampleid'):
+    """Return boolean Series where
 
-    size = len(dataframe)
-
-    if not 'filename' not in dataframe.columns:
-        dataframe['filename'] = get_file_names(dataframe, name_column=name_column)
-
-    drop_indices = []
-    for index, row in dataframe.iterrows():
-        file_path = os.path.join(folder, row.filename)
-        with rasterio.open(file_path) as src:
+    Args:
+        df (pd.DataFrame): 
+        folder (str): directory with images
+    Returns:
+        pd.Series: True value if file has 0s over all bands in any pixel
+    """
+    def missing_data_across_bands(file):
+        with rasterio.open(file) as src:
             data = src.read()
             if np.any(data.sum(axis=0) == 0):
-                drop_indices.append(index)  
+                return True
+            return False
 
-    dataframe = dataframe.drop(drop_indices)
+    if not 'filename' in dataframe.columns:
+        dataframe['filename'] = get_file_names(dataframe, name_column=name_column)
 
-    print(f'Dropped {size - len(dataframe)} rows where the corresponding file had missing data. Rows remaining: {len(dataframe)}')
-
-    return dataframe
-
-
+    return dataframe.filename.apply(lambda filename: missing_data_across_bands(os.path.join(folder, filename)) )
 
 
 def find_id_sindex(file_name, sindex, gdf):
@@ -176,10 +165,18 @@ if __name__ == '__main__':
 
     folder = 'data/seco_campaign_landsat/medians'
     out_folder = 'data/seco_campaign_landsat/medians_fixed_naming'
-    fix_naming(folder, out_folder)'''
+    fix_naming(folder, out_folder)
 
     labels = 'data/tmp/annotations_with_majority_class.csv'
-    counts = get_class_counts(pd.read_csv(labels))
+    counts = get_class_counts(pd.read_csv(labels))'''
+
+
+
+    folder = 'data/tmp/renamed_medians'
+    annotations = 'data/tmp/annotations_with_majority_class.csv'
+    
+    img_labels = pd.read_csv(annotations)
+    existing_files = img_labels.loc[file_exists(img_labels, folder)]
+    x = has_missing_data(existing_files, folder)
     pdb.set_trace()
     print()
-
