@@ -7,19 +7,35 @@ import rasterio
 from torchvision import transforms
 from torch.nn import Sequential
 from torch.utils.data import Dataset
-from preprocessing import drop_if_not_file_exists, drop_if_missing_data, get_file_names
+from preprocessing import file_exists, has_missing_data, get_file_names, has_single_label
 
 
 class GeoWikiDataset(Dataset):
-    def __init__(self, annotations_file, img_dir, drop_rows_with_missing_file=False, drop_rows_with_nan_data=False, transform=None, target_transform=None):
+    def __init__(self, 
+                 annotations_file, 
+                 img_dir, 
+                 drop_rows_with_missing_file=True, 
+                 drop_rows_with_nan_data=False, 
+                 single_label_rows_only=False, 
+                 transform=None, 
+                 target_transform=None):
+    
         self.img_labels = pd.read_csv(annotations_file)
         self.img_labels['filename'] = get_file_names(self.img_labels, 'sampleid')
-        
+
         if drop_rows_with_missing_file:
-            self.img_labels = drop_if_not_file_exists(self.img_labels, img_dir)
+            size = len(self.img_labels)
+            self.img_labels = self.img_labels.loc[file_exists(self.img_labels, img_dir)].reset_index(drop=True)
+            print(f'Dropped {size - len(self.img_labels)} rows where the corresponding file was not found. Rows remaining: {len(self.img_labels)}')
+        if single_label_rows_only:
+            size = len(self.img_labels)
+            self.img_labels = self.img_labels.loc[has_single_label(self.img_labels)].reset_index(drop=True)
+            print(f'Dropped {size - len(self.img_labels)} rows with two or more labels. Rows remaining: {len(self.img_labels)}')
         if drop_rows_with_nan_data:
-            self.img_labels = drop_if_missing_data(self.img_labels, img_dir)
-        
+            size = len(self.img_labels)
+            self.img_labels = self.img_labels.loc[~has_missing_data(self.img_labels, img_dir)].reset_index(drop=True)
+            print(f'Dropped {size - len(self.img_labels)} rows where the corresponding file contained missing data. Rows remaining: {len(self.img_labels)}')  
+                 
         self.img_dir = img_dir
         self.transform = transform
         self.target_transform = target_transform
