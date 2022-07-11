@@ -14,6 +14,7 @@ from shapely.geometry import box
 
 
 def has_ambiguous_label(df):
+    #TODO: re-do to 'has_majority_label'
     """Identify and return boolean filter of rows where two or more classes
     have identical number of votes (ie. there is no unique class 
     that has most votes).
@@ -29,6 +30,22 @@ def has_ambiguous_label(df):
     df['second_most_votes'] = df.drop(['most_votes', 'geometry'], axis=1).apply(lambda row: row.nlargest(2).values[-1],axis=1)
 
     return df.most_votes == df.second_most_votes
+
+
+def has_single_label(df):
+    """Identify and return boolean filter of rows with a single class
+    that has all the votes
+
+    Args:
+        df (pd.DataFrame): df with 'sampleid' and classes with votes and 'geometry'
+
+    Returns:
+        pd.DataFrame: contains rows where all votes are for the same class
+    """
+    df = df.set_index('sampleid')
+    df['second_most_votes'] = df.drop(['most_votes', 'geometry'], axis=1, errors='ignore').apply(lambda row: row.nlargest(2).values[-1],axis=1)
+    
+    return df.reset_index().drop('sampleid', axis=1, errors='ignore').second_most_votes > 0
 
 
 
