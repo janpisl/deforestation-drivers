@@ -120,7 +120,8 @@ def main(train_dataset,
             'weighted loss': weighted_loss,
             'learning rate': lr,
             'images dropped if missing values': missing_vals_dropped,
-            'images dropped if multiple answers': single_label_only
+            'images dropped if multiple answers': single_label_only,
+            'weight decay': weight_decay
         }
 
         wandb.init(project='geowiki_1', 

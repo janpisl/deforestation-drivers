@@ -35,7 +35,7 @@ if __name__ == '__main__':
     for weighted_loss in [False]:
         for batch_size in [128]:
             for lr in [0.0005, 0.001, 0.002, 0.005, 0.01]:
-                for weight_decay in [0, 0.01, 0.1]:
+                for weight_decay in [0, 0.001, 0.1]:
                     try:
                         main(train_dataset, test_dataset, device, weighted_loss, batch_size, epochs, lr, weight_decay, drop_missing_vals, single_label_only, log_wandb, class_weights)
                     except Exception as e:
