@@ -4,6 +4,9 @@ python pipeline_softmax.py \
     --annotations_path data/tmp/annotations_with_majority_class.csv \
     --image_folder data/seco_campaign_landsat/medians_fixed_naming/ \
     --batch_size 128\
+    --drop_rows_with_missing_vals\
+    --single_label_only\
+    --weight_decay 0.001\
     --weighted_loss\
     --wandb
 '''
@@ -168,20 +171,22 @@ def main(train_dataset,
             val_recall_dict = {'Val recall - ' + k: v for k,v in val_recall_dict.items()} 
 
 
-            avg_f1_score_train = train_f1_scores.mean()
-            avg_f1_score_val = val_f1_scores.mean()
-            print(f'Average f1 score: train: {avg_f1_score_train}, validation: {avg_f1_score_val}')
+            f1_score_train_mean, f1_score_train_median = train_f1_scores.mean(), train_f1_scores.median()
+            f1_score_val_mean, f1_score_val_median = val_f1_scores.mean(),  val_f1_scores.median()
+            print(f'Average f1 score: train: {f1_score_train_mean}, validation: {f1_score_val_mean}')
 
-            if avg_f1_score_val > best_val_f1_score:
-                best_val_f1_score = avg_f1_score_val
+            if f1_score_val_mean > best_val_f1_score:
+                best_val_f1_score = f1_score_val_mean
                 best_epoch = epoch
 
             if log_wandb:
                 wandb.log({
                         "train_loss": epoch_loss,
                         "validation loss": eval_loss,
-                        "Average f1 score (train)":avg_f1_score_train,
-                        "Average f1 score (val)":avg_f1_score_val,
+                        "Mean f1 score (train)":f1_score_train_mean,
+                        "Mean f1 score (val)":f1_score_val_mean,
+                        "Median f1 score (train)":f1_score_train_median,
+                        "Median f1 score (val)":f1_score_val_median,
                         "Best average f1 score (val)": best_val_f1_score,
                         "Epoch with best val f1 score": best_epoch,
                         #"output": wandb.Image(output[0]),
@@ -250,7 +255,7 @@ if __name__ == '__main__':
     weighted_loss = True if args.weighted_loss is not None else False
 
     torch.manual_seed(420)
-
+    np.random.seed(420)
     train_dataset, test_dataset, class_weights = get_datasets(annotations_path, images_path, drop_missing_vals, single_label_only, device)
 
     main(train_dataset, test_dataset, device, weighted_loss, batch_size, epochs, lr, weight_decay, drop_missing_vals, single_label_only, log_wandb, class_weights)
