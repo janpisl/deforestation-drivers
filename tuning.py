@@ -2,6 +2,7 @@
 import pdb
 import argparse
 
+import numpy as np
 import torch
 
 from pipeline_softmax import get_datasets, main
@@ -25,6 +26,7 @@ if __name__ == '__main__':
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     torch.manual_seed(420)
+    np.random.seed(420)
 
 
     annotations_path, images_path, epochs, drop_missing_vals, single_label_only, log_wandb = \
@@ -33,9 +35,10 @@ if __name__ == '__main__':
     train_dataset, test_dataset, class_weights = get_datasets(annotations_path, images_path, drop_missing_vals, single_label_only, device)
 
     for weighted_loss in [False]:
-        for batch_size in [128]:
+        for batch_size in [64,128,256]:
             for lr in [0.0005, 0.001, 0.002, 0.005, 0.01]:
-                for weight_decay in [0, 0.001, 0.1]:
+                for weight_decay in [0.0000001, 0.000001, 0.00001, 0.0001, 0.0005]:
+                #for weight_decay in [0]:
                     try:
                         main(train_dataset, test_dataset, device, weighted_loss, batch_size, epochs, lr, weight_decay, drop_missing_vals, single_label_only, log_wandb, class_weights)
                     except Exception as e:

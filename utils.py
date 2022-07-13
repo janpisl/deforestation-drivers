@@ -5,8 +5,8 @@ import pandas as pd
 import pdb
 
 def get_class_counts(dataframe):
-    
-    array = dataframe.drop(['sampleid', 'filename', 'geometry'], axis=1, errors='ignore').to_numpy()
+    #TODO: extend this so that it works when there is no single majority vote
+    array = dataframe.drop(['sampleid', 'filename', 'geometry', 'Unnamed: 0'], axis=1, errors='ignore').to_numpy()
     array = array - array.max(axis=1, keepdims=True)
     array[array == 0] = 1
     array[array < 1] = 0

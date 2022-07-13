@@ -59,7 +59,7 @@ def get_file_names(dataframe, name_column):
 
 
 def file_exists(dataframe, folder, name_column='sampleid'):
-
+    
     if not 'filename' in dataframe.columns:
         dataframe['filename'] = get_file_names(dataframe, name_column=name_column)
 
