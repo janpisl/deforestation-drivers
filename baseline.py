@@ -55,20 +55,27 @@ if __name__ == '__main__':
         train_feats = feature_extractor([train_dataset[i] for i in range(len(train_dataset))])
         test_feats = feature_extractor([test_dataset[i] for i in range(len(test_dataset))])
     except:
-      pdb.set_trace()
-      feats = feature_extractor(test)
+        pdb.set_trace()
+        test = [train_dataset[i] for i in range(1000)]
+        train_feats = feature_extractor([train_dataset[i] for i in range(len(train_dataset))])
+        test_feats = feature_extractor([test_dataset[i] for i in range(len(test_dataset))])
 
+    #TODO: normalize rows
+    #df = df.div(df.sum(axis=1), axis=0)   <- this is not correct
+    #pdb.set_trace()
     model = RandomForestClassifier(max_depth=10, random_state=0)
 
     X = train_feats[[col for col in train_feats.columns if col != 'target']]
     y = train_feats['target']
 
-    model.fit(X,y)
+    model = model.fit(X,y)
     pdb.set_trace()
     print()
 
     X_test = [col for col in test_feats.columns if col != 'target']
     y_test = test_feats['target']
+
+
 
     #print (clf.score(training, training_labels))
     #print(clf.score(testing, testing_labels))
