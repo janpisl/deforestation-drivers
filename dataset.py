@@ -4,11 +4,12 @@ import pdb
 import pandas as pd
 from torch import Tensor
 import rasterio
+from torch import utils
 from torchvision import transforms
 from torch.nn import Sequential
 from torch.utils.data import Dataset
 from preprocessing import file_exists, has_missing_data, get_file_names, has_single_label
-
+from utils import get_class_counts
 
 class GeoWikiDataset(Dataset):
     def __init__(self, 
@@ -71,3 +72,51 @@ def get_image_transform(folder, cropsize=32):
         transforms.CenterCrop(cropsize),
         transforms.Normalize(means, stds),
     )
+
+
+
+def get_datasets(annotations_path, 
+                 images_path, 
+                 drop_missing_vals, 
+                 single_label_only,
+                 annotations_path_test, 
+                 image_folder_test,
+                 device):
+
+    image_transform = get_image_transform(images_path)
+
+    full_dataset = GeoWikiDataset(
+        annotations_file=annotations_path, 
+        img_dir=images_path, 
+        drop_rows_with_missing_file=True, #This will be always True but keeping it here for explicity
+        drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
+        single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
+        transform=image_transform)
+
+
+    #I think technically i should only use the train dataset to get class counts
+    #TODO: weights not implemented because get_class_counts() currently 
+    #requires a single majority class
+    #class_counts = get_class_counts(full_dataset.img_labels)
+    #weights_unnorm = Tensor([1/i for i in class_counts]).to(device)
+    #weights = weights_unnorm/weights_unnorm.mean()
+    weights = None
+
+    train_size = int(0.8 * len(full_dataset))
+    test_size = len(full_dataset) - train_size
+    train_dataset, test_dataset = utils.data.random_split(full_dataset, [train_size, test_size])
+
+
+    # If separate validation set is provided, it is used for validation
+    # Note that the test_dataset from random_split is not used at all and can be used for final evaluation
+    if annotations_path_test and image_folder_test:
+        test_dataset = GeoWikiDataset(
+            annotations_file=annotations_path_test, 
+            img_dir=image_folder_test, 
+            drop_rows_with_missing_file=True, #This will be always True but keeping it here for explicity
+            drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
+            single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
+            transform=image_transform)   
+        
+
+    return train_dataset, test_dataset, weights
