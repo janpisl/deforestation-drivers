@@ -1,0 +1,40 @@
+{
+    "seed": 420,
+
+    "data": {
+        
+        "train":
+        {
+            "annotations": "data/labels/campaign_labels_processed.csv",
+            "image_folder": "data/seco/L8/campaign/2020/annual/medians"
+        },
+
+        "validation":
+        {
+            "annotations": "data/labels/controls_labels_processed.csv",
+            "image_folder": "data/seco/L8/controls/2020/annual/medians"
+        }
+    },
+
+
+    "search" :{
+        "batch_size": [64, 128, 256],
+        "learning_rate": [0.0001],
+        "epochs": [15],
+        "weight_decay": [0],
+        "weighted_loss": ["False"],
+        "drop_rows_with_missing_vals": ["True", "False"],
+        "single_label_only": ["False", "True"]
+
+    },
+
+    "output": {
+        "model_path": "models/some_model.pth"
+    },
+
+    "wandb": {
+        "log_to_wandb" : "True",
+        "project" : "geowiki_1",
+        "entity" : "janpisl"
+    }
+}
