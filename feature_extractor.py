@@ -146,7 +146,7 @@ def get_stats(band,band_name, mean=True, variance=True, skewness=False, kurtosis
     return df
 
 
-def get_features_for_band(band,b, distances, angles, glcms=True, statistics=True, entropy=False):
+def get_features_for_band(band,b, distances, angles, glcms=True, statistics=True, entropy=True):
     '''Extract features for a given band.
 
     Arguments:
