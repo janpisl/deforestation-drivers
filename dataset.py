@@ -31,6 +31,7 @@ class GeoWikiDataset(Dataset):
                  drop_rows_with_nan_data=False, 
                  majority_label_rows_only=False,
                  single_label_rows_only=False, 
+                 undersample=False,
                  transform=None, 
                  target_transform=None):
     
@@ -39,26 +40,32 @@ class GeoWikiDataset(Dataset):
         else:
             self.img_labels = pd.read_csv(annotations_file)
 
-        self.img_labels['filename'] = get_file_names(self.img_labels, 'sampleid')
+        if undersample:
+            print("An implementation of undersample is being used that is fast but may not result in the exact number of classes.")
+            self.img_labels = get_balanced_classes(self.img_labels).reset_index(drop=True)
 
+        self.img_labels['filename'] = get_file_names(self.img_labels, 'sampleid')
         if drop_rows_with_missing_file:
             size = len(self.img_labels)
             self.img_labels = self.img_labels.loc[file_exists(self.img_labels, img_dir)].reset_index(drop=True)
             print(f'Dropped {size - len(self.img_labels)} rows where the corresponding file was not found. Rows remaining: {len(self.img_labels)}')
+       
         if single_label_rows_only:
             size = len(self.img_labels)
             self.img_labels = self.img_labels.loc[has_single_label(self.img_labels)].reset_index(drop=True)
             print(f'Dropped {size - len(self.img_labels)} rows with two or more labels. Rows remaining: {len(self.img_labels)}')
+       
         if majority_label_rows_only:
             if not single_label_rows_only: #If this was applied, there are no rows without majority label
                 size = len(self.img_labels)
                 self.img_labels = self.img_labels.loc[has_majority_label(self.img_labels)].reset_index(drop=True)
                 print(f'Dropped {size - len(self.img_labels)} rows with two or more labels with equal number of votes. Rows remaining: {len(self.img_labels)}')
+       
         if drop_rows_with_nan_data:
             size = len(self.img_labels)
             self.img_labels = self.img_labels.loc[~has_missing_data(self.img_labels, img_dir)].reset_index(drop=True)
             print(f'Dropped {size - len(self.img_labels)} rows where the corresponding file contained missing data. Rows remaining: {len(self.img_labels)}')  
-                 
+
         self.img_dir = img_dir
         self.transform = transform
         self.target_transform = target_transform
@@ -70,7 +77,8 @@ class GeoWikiDataset(Dataset):
         img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx]['filename'])
         with rasterio.open(img_path) as source:
             image = Tensor(source.read())
-        labels = self.img_labels.iloc[idx].drop(['geometry', 'filename', 'sampleid'], errors='ignore').to_dict()
+
+        labels = self.img_labels.iloc[idx].to_dict()
         if self.transform:
             image = self.transform(image)
         if self.target_transform:
@@ -80,6 +88,28 @@ class GeoWikiDataset(Dataset):
 
         return image, labels
 
+
+
+def get_balanced_classes(df):
+    
+    labels = df.drop([col for col in df.columns if col not in CLASSES], axis=1)
+
+    classes, counts = np.unique(labels.idxmax(axis=1), return_counts=True)
+    min_count = counts.min()
+    indices = []
+    for _class in CLASSES:
+        try:
+            class_samples = labels.loc[labels.idxmax(axis=1) == _class].sample(min_count).index
+        except ValueError:
+            class_samples = labels.loc[labels.idxmax(axis=1) == _class].index
+        indices.append(class_samples.tolist())
+
+    def flatten(xss):
+        return [x for xs in xss for x in xs]
+
+    indices = flatten(indices)
+
+    return df.loc[indices]
 
 
 def get_image_transform(folder, cropsize=32):
@@ -127,6 +157,7 @@ def get_datasets(annotations_path,
                  drop_missing_vals, 
                  majority_label_only,
                  single_label_only,
+                 undersample,
                  controls_annotations_path=None,
                  controls_image_path=None):
 
@@ -134,6 +165,7 @@ def get_datasets(annotations_path,
 
     train_annotations, val_annotations, test_annotations = geospatial_data_split(pd.read_csv(annotations_path))
 
+    print("\nProcessing training dataset")
     train_dataset = GeoWikiDataset(
         annotations_file=train_annotations, 
         img_dir=images_path, 
@@ -141,8 +173,10 @@ def get_datasets(annotations_path,
         drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
         majority_label_rows_only=majority_label_only, #Only use rows where one class has more votes than any other
         single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
+        undersample=undersample, #If True, class balance is forced by only using as many examples from each class that the rarest class has
         transform=image_transform)
 
+    print("\nProcessing validation dataset")
     val_dataset = GeoWikiDataset(
         annotations_file=val_annotations, 
         img_dir=images_path, 
@@ -152,6 +186,7 @@ def get_datasets(annotations_path,
         single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
         transform=image_transform)
 
+    print("\nProcessing test dataset")
     test_dataset = GeoWikiDataset(
         annotations_file=test_annotations, 
         img_dir=images_path, 
@@ -170,6 +205,7 @@ def get_datasets(annotations_path,
     weights = None
 
     if controls_annotations_path and controls_image_path:
+        print("\nProcessing controls dataset")
         controls_dataset = GeoWikiDataset(
             annotations_file=controls_annotations_path, 
             img_dir=controls_image_path, 
