@@ -1,15 +1,27 @@
 import os
 import pdb
+from re import L
 
+import utm
+import numpy as np
 import pandas as pd
+import geopandas as gpd
 from torch import Tensor
 import rasterio
 from torch import utils
 from torchvision import transforms
 from torch.nn import Sequential
 from torch.utils.data import Dataset
-from preprocessing import file_exists, has_missing_data, get_file_names, has_single_label
+from preprocessing import file_exists, has_majority_label, has_missing_data, get_file_names, has_single_label
 from utils import get_class_counts
+
+CLASSES = ['Subsistence agriculture', 'Managed forest/forestry',
+       'Pasture', 'Roads/trails/buildings',
+       'Other natural disturbances/No tree-loss driver',
+       'Commercial agriculture', 'Wildfire (disturbance)',
+       'Commercial oil palm or other palm plantations',
+       'Mining and crude oil extraction']
+
 
 class GeoWikiDataset(Dataset):
     def __init__(self, 
@@ -17,11 +29,16 @@ class GeoWikiDataset(Dataset):
                  img_dir, 
                  drop_rows_with_missing_file=True, 
                  drop_rows_with_nan_data=False, 
+                 majority_label_rows_only=False,
                  single_label_rows_only=False, 
                  transform=None, 
                  target_transform=None):
     
-        self.img_labels = pd.read_csv(annotations_file)
+        if isinstance(annotations_file, pd.DataFrame):
+            self.img_labels = annotations_file
+        else:
+            self.img_labels = pd.read_csv(annotations_file)
+
         self.img_labels['filename'] = get_file_names(self.img_labels, 'sampleid')
 
         if drop_rows_with_missing_file:
@@ -32,6 +49,11 @@ class GeoWikiDataset(Dataset):
             size = len(self.img_labels)
             self.img_labels = self.img_labels.loc[has_single_label(self.img_labels)].reset_index(drop=True)
             print(f'Dropped {size - len(self.img_labels)} rows with two or more labels. Rows remaining: {len(self.img_labels)}')
+        if majority_label_rows_only:
+            if not single_label_rows_only: #If this was applied, there are no rows without majority label
+                size = len(self.img_labels)
+                self.img_labels = self.img_labels.loc[has_majority_label(self.img_labels)].reset_index(drop=True)
+                print(f'Dropped {size - len(self.img_labels)} rows with two or more labels with equal number of votes. Rows remaining: {len(self.img_labels)}')
         if drop_rows_with_nan_data:
             size = len(self.img_labels)
             self.img_labels = self.img_labels.loc[~has_missing_data(self.img_labels, img_dir)].reset_index(drop=True)
@@ -54,7 +76,7 @@ class GeoWikiDataset(Dataset):
         if self.target_transform:
             labels = self.target_transform(labels)
 
-        labels = Tensor([value for _, value in labels.items()])
+        labels = Tensor([value for key, value in labels.items() if key in CLASSES])
 
         return image, labels
 
@@ -74,25 +96,70 @@ def get_image_transform(folder, cropsize=32):
     )
 
 
+def geospatial_data_split(df, method='degree'):
+    #TODO:
+    # 2 parameters
+    #  - size of one stripe if 'degree'
+    #  - train/val/test split ratio
+    if not method in ['degree', 'utm']:
+        raise NotImplementedError("Supported split method are 'degree' and 'utm' ")
+    df['geometry'] = gpd.GeoSeries.from_wkt(df['geometry'])
+    
+    if method == 'degree':
+        df['stripe'] = df.geometry.apply(lambda geom: round(geom.x)) 
+    elif method == 'utm':
+        df['stripe'] = df.geometry.apply(lambda geom: np.sign(geom.y)*(utm.from_latlon(geom.y, geom.x)[2]))
+    df['split'] = None
+    # Split is 60/20/20
+    split = ['Tr', 'Tr', 'Tr', 'Val', 'T']
+
+    for i, stripe in enumerate(np.unique(df['stripe'], return_counts=True)[0]):
+        stripes = df.loc[df['stripe'] == stripe]
+        df.loc[stripes.index, 'split'] = split[i%len(split)]
+
+    
+    return df.loc[df.split == 'Tr'].copy(), df.loc[df.split == 'Val'].copy(), df.loc[df.split == 'T'].copy()
+
+
 
 def get_datasets(annotations_path, 
                  images_path, 
                  drop_missing_vals, 
+                 majority_label_only,
                  single_label_only,
-                 annotations_path_test, 
-                 image_folder_test,
-                 device):
+                 controls_annotations_path=None,
+                 controls_image_path=None):
 
     image_transform = get_image_transform(images_path)
 
-    full_dataset = GeoWikiDataset(
-        annotations_file=annotations_path, 
+    train_annotations, val_annotations, test_annotations = geospatial_data_split(pd.read_csv(annotations_path))
+
+    train_dataset = GeoWikiDataset(
+        annotations_file=train_annotations, 
         img_dir=images_path, 
         drop_rows_with_missing_file=True, #This will be always True but keeping it here for explicity
         drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
+        majority_label_rows_only=majority_label_only, #Only use rows where one class has more votes than any other
         single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
         transform=image_transform)
 
+    val_dataset = GeoWikiDataset(
+        annotations_file=val_annotations, 
+        img_dir=images_path, 
+        drop_rows_with_missing_file=True, #This will be always True but keeping it here for explicity
+        drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
+        majority_label_rows_only=True, #This is false for evaluation in order to compute statistics like Prec/Recall/F1-score 
+        single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
+        transform=image_transform)
+
+    test_dataset = GeoWikiDataset(
+        annotations_file=test_annotations, 
+        img_dir=images_path, 
+        drop_rows_with_missing_file=True, #This will be always True but keeping it here for explicity
+        drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
+        majority_label_rows_only=True, #This is false for evaluation in order to compute statistics like Prec/Recall/F1-score 
+        single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
+        transform=image_transform)
 
     #I think technically i should only use the train dataset to get class counts
     #TODO: weights not implemented because get_class_counts() currently 
@@ -102,21 +169,20 @@ def get_datasets(annotations_path,
     #weights = weights_unnorm/weights_unnorm.mean()
     weights = None
 
-    train_size = int(0.8 * len(full_dataset))
-    test_size = len(full_dataset) - train_size
-    train_dataset, test_dataset = utils.data.random_split(full_dataset, [train_size, test_size])
+    if controls_annotations_path and controls_image_path:
+        controls_dataset = GeoWikiDataset(
+            annotations_file=controls_annotations_path, 
+            img_dir=controls_image_path, 
+            # The following params are hardcoded so the evaluation stays the same throughout
+            # different experiments. Single_label_rows should only appear in the validation set but as a sanity check
+            #I keep it to True
+            drop_rows_with_missing_file=True, 
+            drop_rows_with_nan_data=True, 
+            majority_label_rows_only=True, #This is false for evaluation in order to compute statistics like Prec/Recall/F1-score 
+            single_label_rows_only=True,
+            transform=image_transform)
+    else:
+        controls_dataset = None
 
 
-    # If separate validation set is provided, it is used for validation
-    # Note that the test_dataset from random_split is not used at all and can be used for final evaluation
-    if annotations_path_test and image_folder_test:
-        test_dataset = GeoWikiDataset(
-            annotations_file=annotations_path_test, 
-            img_dir=image_folder_test, 
-            drop_rows_with_missing_file=True, #This will be always True but keeping it here for explicity
-            drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
-            single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
-            transform=image_transform)   
-        
-
-    return train_dataset, test_dataset, weights
+    return train_dataset, val_dataset, test_dataset, controls_dataset, weights
