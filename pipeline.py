@@ -101,17 +101,17 @@ def train(train_dataset,
             epoch_loss, eval_loss = 1000*epoch_loss/len(train_dataset), 1000*eval_loss/len(test_dataset)
             print(f"\nEpoch: {epoch}, Train loss: ", epoch_loss, " Val loss: ", eval_loss)
 
-            #train_f1_scores, train_precision, train_recall = compute_stats(train_dataloader, net, device)
+            train_f1_scores, train_precision, train_recall = compute_stats(train_dataloader, net, device)
             val_f1_scores, val_precision, val_recall = compute_stats(test_dataloader, net, device)
 
-            #train_f1_dict = dict(zip(CLASSES, train_f1_scores))
-            #train_f1_dict = {'Train f1 -' + k: v for k,v in train_f1_dict.items()}
+            train_f1_dict = dict(zip(CLASSES, train_f1_scores))
+            train_f1_dict = {'Train f1 -' + k: v for k,v in train_f1_dict.items()}
             
-            #train_precision_dict = dict(zip(CLASSES, train_precision))
-            #train_precision_dict = {'Train precision -' + k: v for k,v in train_precision_dict.items()}           
+            train_precision_dict = dict(zip(CLASSES, train_precision))
+            train_precision_dict = {'Train precision -' + k: v for k,v in train_precision_dict.items()}           
             
-            #train_recall_dict = dict(zip(CLASSES, train_recall))
-            #train_recall_dict = {'Train recall -' + k: v for k,v in train_recall_dict.items()} 
+            train_recall_dict = dict(zip(CLASSES, train_recall))
+            train_recall_dict = {'Train recall -' + k: v for k,v in train_recall_dict.items()} 
 
             val_f1_dict = dict(zip(CLASSES, val_f1_scores))
             val_f1_dict = {'Val f1 -' + k: v for k,v in val_f1_dict.items()}
@@ -123,9 +123,9 @@ def train(train_dataset,
             val_recall_dict = {'Val recall - ' + k: v for k,v in val_recall_dict.items()} 
 
 
-            #f1_score_train_mean, f1_score_train_median = train_f1_scores.mean(), train_f1_scores.median()
+            f1_score_train_mean, f1_score_train_median = train_f1_scores.mean(), train_f1_scores.median()
             f1_score_val_mean, f1_score_val_median = val_f1_scores.mean(),  val_f1_scores.median()
-            #print(f'Mean f1 score: train: {f1_score_train_mean}, validation: {f1_score_val_mean}')
+            print(f'Mean f1 score: train: {f1_score_train_mean}, validation: {f1_score_val_mean}')
 
             if f1_score_val_mean > best_val_f1_score:
                 best_val_f1_score = f1_score_val_mean
@@ -135,15 +135,15 @@ def train(train_dataset,
                 wandb.log({
                         "train_loss": epoch_loss,
                         "validation loss": eval_loss,
-                        #"Mean f1 score (train)":f1_score_train_mean,
+                        "Mean f1 score (train)":f1_score_train_mean,
                         "Mean f1 score (val)":f1_score_val_mean,
-                        #"Median f1 score (train)":f1_score_train_median,
+                        "Median f1 score (train)":f1_score_train_median,
                         "Median f1 score (val)":f1_score_val_median,
                         "Best average f1 score (val)": best_val_f1_score,
                         "Epoch with best val f1 score": best_epoch,
-                        #**train_f1_dict,
-                        #**train_precision_dict,
-                        #**train_recall_dict,
+                        **train_f1_dict,
+                        **train_precision_dict,
+                        **train_recall_dict,
                         **val_f1_dict,
                         **val_precision_dict,
                         **val_recall_dict
@@ -153,26 +153,26 @@ def train(train_dataset,
 
 
 
-def main(config):
-
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+def main(config, device):
 
     log_wandb = parse_boolean(config['wandb']['log_to_wandb'])
     weighted_loss = parse_boolean(config['search']['weighted_loss'])
     single_label_only = parse_boolean(config['search']['single_label_only'])
     drop_missing_vals = parse_boolean(config['search']['drop_rows_with_missing_vals'])
     majority_label_only = parse_boolean(config['search']['majority_label_only'])
-    
-    set_seed(config['seed'])
+    undersample = parse_boolean(config['search']['undersample'])
 
     train_dataset, val_dataset, test_dataset, controls_dataset, class_weights = \
                                                  get_datasets(config['data']['annotations'], 
                                                               config['data']['image_folder'], 
-                                                              drop_missing_vals, 
-                                                              single_label_only, 
-                                                              majority_label_only,
-                                                              config['data']['controls']['annotations'], 
-                                                              config['data']['controls']['image_folder'])
+                                                              drop_missing_vals=drop_missing_vals, 
+                                                              majority_label_only=majority_label_only,
+                                                              single_label_only=single_label_only,
+                                                              undersample=undersample,
+                                                              controls_annotations_path=config['data']['controls']['annotations'], 
+                                                              controls_image_path=config['data']['controls']['image_folder'])
+
+    #TODO: data augmentation
 
     config['search']['class_weights'] = class_weights
     config['search']['train dataset size'] = len(train_dataset)
@@ -201,9 +201,12 @@ if __name__ == '__main__':
     keys, values = zip(*config['search'].items())
     permutations_dicts = [dict(zip(keys, v)) for v in itertools.product(*values)]
 
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    set_seed(config['seed'])
+
     for variant in permutations_dicts:
         config['search'] = variant
-        main(config)
+        main(config, device)
 
 
 

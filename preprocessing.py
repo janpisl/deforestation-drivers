@@ -35,7 +35,7 @@ def has_majority_label(df):
     df['most_votes'] = df.max(axis=1)
     df['second_most_votes'] = df.drop([col for col in df.columns if col not in CLASSES], axis=1).apply(lambda row: row.nlargest(2).values[-1],axis=1)
 
-    return df.most_votes > df.second_most_votes
+    return (df.most_votes > df.second_most_votes).reset_index(drop=True)
 
 
 def has_single_label(df):
@@ -51,7 +51,7 @@ def has_single_label(df):
     df = df.set_index('sampleid')
     df['second_most_votes'] = df.drop([col for col in df.columns if col not in CLASSES], axis=1, errors='ignore').apply(lambda row: row.nlargest(2).values[-1],axis=1)
 
-    return df.reset_index().drop('sampleid', axis=1, errors='ignore').second_most_votes == 0
+    return (df.second_most_votes == 0).reset_index(drop=True)
 
 
 
