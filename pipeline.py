@@ -14,51 +14,15 @@ import argparse
 import itertools
 
 import numpy as np
-from yaml import parse
 import torch
 from torch.utils.data import DataLoader
 import wandb
-from torchmetrics import F1Score
-from torchmetrics.functional import f1_score, precision_recall
 
-from utils import compute_eval_loss
-from dataset import GeoWikiDataset, get_image_transform, get_datasets
-from resnet18 import ResNet18
+from utils import compute_eval_loss, parse_boolean, set_seed
+from dataset import get_datasets
+from model import ResNet18, get_resnet18_pytorch
+from eval import compute_stats, CLASSES
 
-CLASSES = ['Subsistence agriculture', 'Managed forest/forestry',
-       'Pasture', 'Roads/trails/buildings',
-       'Other natural disturbances/No tree-loss driver',
-       'Commercial agriculture', 'Wildfire (disturbance)',
-       'Commercial oil palm or other palm plantations',
-       'Mining and crude oil extraction']
-
-
-def compute_stats(dataloader, net, device):
-    """Compute f1 score
-    """
-    all_outputs = []
-    all_targets = []
-    for inputs, targets in dataloader:
-        inputs, targets = inputs.to(device), targets.to(device)
-        output = net(inputs) 
-        output = output.to(device)
-        out = torch.nn.functional.softmax(output, dim=1)
-        
-        output_classes = torch.argmax(out, dim=1)
-        #strict f1 score - only the most voted class counts as correct
-        target_classes = torch.argmax(targets, axis=1)
-
-        all_outputs.append(output_classes)
-        all_targets.append(target_classes)
-
-
-    outputs = torch.concat(all_outputs)
-    targets = torch.concat(all_targets)
-    
-    f1_scores = f1_score(outputs, targets, average=None, num_classes=len(CLASSES))
-    precision_scores, recall_scores = precision_recall(outputs, targets, average=None, num_classes=len(CLASSES))
-
-    return f1_scores, precision_scores, recall_scores
 
 
 
@@ -102,7 +66,9 @@ def train(train_dataset,
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
-    net = ResNet18(output_sigmoid=False).to(device)
+    #net = ResNet18(output_sigmoid=False).to(device)
+    net = get_resnet18_pytorch().to(device)
+
     optimizer = torch.optim.Adam(net.parameters(), lr=lr,weight_decay=weight_decay)
     
     if weighted_loss:
@@ -175,9 +141,9 @@ def train(train_dataset,
                         "Median f1 score (val)":f1_score_val_median,
                         "Best average f1 score (val)": best_val_f1_score,
                         "Epoch with best val f1 score": best_epoch,
-                        **train_f1_dict,
-                        **train_precision_dict,
-                        **train_recall_dict,
+                        #**train_f1_dict,
+                        #**train_precision_dict,
+                        #**train_recall_dict,
                         **val_f1_dict,
                         **val_precision_dict,
                         **val_recall_dict
@@ -185,12 +151,6 @@ def train(train_dataset,
 
                 })
 
-
-
-
-def parse_boolean(value):
-    assert value.lower() in ['true', 'false'], f'Must be True or False, got {value}'
-    return True if value.lower() == 'true' else False
 
 
 def main(config):
@@ -201,24 +161,26 @@ def main(config):
     weighted_loss = parse_boolean(config['search']['weighted_loss'])
     single_label_only = parse_boolean(config['search']['single_label_only'])
     drop_missing_vals = parse_boolean(config['search']['drop_rows_with_missing_vals'])
+    majority_label_only = parse_boolean(config['search']['majority_label_only'])
     
-    torch.manual_seed(420)
-    np.random.seed(420)
+    set_seed(config['seed'])
 
-    train_dataset, test_dataset, class_weights = get_datasets(config['data']['train']['annotations'], 
-                                                              config['data']['train']['image_folder'], 
+    train_dataset, val_dataset, test_dataset, controls_dataset, class_weights = \
+                                                 get_datasets(config['data']['annotations'], 
+                                                              config['data']['image_folder'], 
                                                               drop_missing_vals, 
                                                               single_label_only, 
-                                                              config['data']['validation']['annotations'], 
-                                                              config['data']['validation']['image_folder'], 
-                                                              device)
+                                                              majority_label_only,
+                                                              config['data']['controls']['annotations'], 
+                                                              config['data']['controls']['image_folder'])
 
     config['search']['class_weights'] = class_weights
     config['search']['train dataset size'] = len(train_dataset)
-    config['search']['evaluation dataset size'] = len(test_dataset)
+    config['search']['evaluation dataset size'] = len(val_dataset)
+    config['search']['model'] = 'torchvision.models.ResNet18(pretrained=False)'
 
     train(train_dataset, 
-         test_dataset, 
+         val_dataset, 
          device, 
          weighted_loss, 
          config['search']['batch_size'], 
