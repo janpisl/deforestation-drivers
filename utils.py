@@ -1,8 +1,14 @@
 
 import numpy as np
 import pandas as pd
+from torch import manual_seed
 
 import pdb
+
+
+def set_seed(seed):
+    manual_seed(seed)
+    np.random.seed(seed)
 
 def get_class_counts(dataframe):
     #TODO: extend this so that it works when there is no single majority vote
@@ -14,6 +20,10 @@ def get_class_counts(dataframe):
     assert np.all(array.sum(axis=1) == 1), 'Expected a single majority vote for each class; check what columns are in the dataframe (should be only labels)'
 
     return array.sum(axis=0) 
+
+def parse_boolean(value):
+    assert value.lower() in ['true', 'false'], f'Must be True or False, got {value}'
+    return True if value.lower() == 'true' else False
 
 
 def compute_weights(labels):
