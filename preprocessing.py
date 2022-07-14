@@ -13,23 +13,29 @@ import numpy as np
 from shapely.geometry import box
 
 
-def has_ambiguous_label(df):
-    #TODO: re-do to 'has_majority_label'
-    """Identify and return boolean filter of rows where two or more classes
-    have identical number of votes (ie. there is no unique class 
-    that has most votes).
+CLASSES = ['Subsistence agriculture', 'Managed forest/forestry',
+       'Pasture', 'Roads/trails/buildings',
+       'Other natural disturbances/No tree-loss driver',
+       'Commercial agriculture', 'Wildfire (disturbance)',
+       'Commercial oil palm or other palm plantations',
+       'Mining and crude oil extraction']
+
+
+def has_majority_label(df):
+    """Identify and return boolean filter of rows where
+     there is a unique class that has most votes
 
     Args:
         df (pd.DataFrame): df with 'sampleid' and classes with votes and 'geometry'
 
     Returns:
-        pd.Series: rows with two or more top voted answers are set to True
+        pd.Series: rows with a single top voted answers are set to True
     """
     df = df.set_index('sampleid')
     df['most_votes'] = df.max(axis=1)
-    df['second_most_votes'] = df.drop(['most_votes', 'geometry'], axis=1).apply(lambda row: row.nlargest(2).values[-1],axis=1)
+    df['second_most_votes'] = df.drop([col for col in df.columns if col not in CLASSES], axis=1).apply(lambda row: row.nlargest(2).values[-1],axis=1)
 
-    return df.most_votes == df.second_most_votes
+    return df.most_votes > df.second_most_votes
 
 
 def has_single_label(df):
@@ -43,7 +49,7 @@ def has_single_label(df):
         pd.Series: rows where all votes are for the same class are True
     """
     df = df.set_index('sampleid')
-    df['second_most_votes'] = df.drop(['most_votes', 'geometry', 'filename'], axis=1, errors='ignore').apply(lambda row: row.nlargest(2).values[-1],axis=1)
+    df['second_most_votes'] = df.drop([col for col in df.columns if col not in CLASSES], axis=1, errors='ignore').apply(lambda row: row.nlargest(2).values[-1],axis=1)
 
     return df.reset_index().drop('sampleid', axis=1, errors='ignore').second_most_votes == 0
 
