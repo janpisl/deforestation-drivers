@@ -24,6 +24,7 @@ from model import ResNet18, get_resnet18_pytorch
 from eval import compute_stats, CLASSES
 
 
+EARLY_STOPPING_PATIENCE = 5
 
 
 def train_one_epoch(net, dataloader, criterion, optimizer, device):
@@ -64,7 +65,7 @@ def train(train_dataset,
     print(f'\n Parameters: weighted loss {weighted_loss}, batch_size {batch_size}, lr {lr}')
 
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     #net = ResNet18(output_sigmoid=False).to(device)
     net = get_resnet18_pytorch().to(device)
@@ -148,9 +149,10 @@ def train(train_dataset,
                         **val_precision_dict,
                         **val_recall_dict
 
-
                 })
 
+            if epoch - best_epoch > EARLY_STOPPING_PATIENCE:
+                break
 
 
 def main(config, device):

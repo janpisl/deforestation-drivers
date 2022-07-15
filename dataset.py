@@ -89,7 +89,6 @@ class GeoWikiDataset(Dataset):
         return image, labels
 
 
-
 def get_balanced_classes(df):
     
     labels = df.drop([col for col in df.columns if col not in CLASSES], axis=1)
