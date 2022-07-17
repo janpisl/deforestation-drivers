@@ -1,7 +1,8 @@
 import os
 import pdb
-from re import L
 
+from imgaug import augmenters as iaa
+import torchvision
 import utm
 import numpy as np
 import pandas as pd
@@ -70,8 +71,10 @@ class GeoWikiDataset(Dataset):
         self.transform = transform
         self.target_transform = target_transform
 
+
     def __len__(self):
         return len(self.img_labels)
+
 
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx]['filename'])
@@ -92,9 +95,10 @@ class GeoWikiDataset(Dataset):
 def get_balanced_classes(df):
     
     labels = df.drop([col for col in df.columns if col not in CLASSES], axis=1)
-
     classes, counts = np.unique(labels.idxmax(axis=1), return_counts=True)
-    min_count = counts.min()
+    min_count = 10
+    print(f"Using {min_count} examples per class.")
+    #min_count = counts.min()
     indices = []
     for _class in CLASSES:
         try:
@@ -103,15 +107,17 @@ def get_balanced_classes(df):
             class_samples = labels.loc[labels.idxmax(axis=1) == _class].index
         indices.append(class_samples.tolist())
 
-    def flatten(xss):
-        return [x for xs in xss for x in xs]
+    def flatten(nested_list):
+        return [x for xs in nested_list for x in xs]
 
+    
     indices = flatten(indices)
 
     return df.loc[indices]
 
 
-def get_image_transform(folder, cropsize=32):
+
+def get_image_transform(folder, augmentation, cropsize=32):
 
     #skip this to save time in development
     #means, stds = get_means_stds(folder)
@@ -119,10 +125,23 @@ def get_image_transform(folder, cropsize=32):
     means = [21.08917549,  26.82532432,  50.31721194,  46.70581121, 224.1870091, 162.03204172,  88.59852001]
     stds = [6.85905351,  7.88942854, 10.88926628, 15.86582499, 23.3733194, 32.04417448, 26.91564416]
 
-    return Sequential(
-        transforms.CenterCrop(cropsize),
-        transforms.Normalize(means, stds),
-    )
+    
+    if augmentation:
+        transform = Sequential(
+            torchvision.transforms.RandomHorizontalFlip(),
+            torchvision.transforms.RandomVerticalFlip(),
+            transforms.CenterCrop(cropsize),
+            transforms.Normalize(means, stds),
+
+        )        
+    else:
+        transform = Sequential(
+            transforms.CenterCrop(cropsize),
+            transforms.Normalize(means, stds),
+        )
+
+    return transform
+
 
 
 def geospatial_data_split(df, method='degree'):
@@ -149,18 +168,18 @@ def geospatial_data_split(df, method='degree'):
     
     return df.loc[df.split == 'Tr'].copy(), df.loc[df.split == 'Val'].copy(), df.loc[df.split == 'T'].copy()
 
-
-
 def get_datasets(annotations_path, 
                  images_path, 
                  drop_missing_vals, 
                  majority_label_only,
                  single_label_only,
                  undersample,
+                 augmentation,
                  controls_annotations_path=None,
                  controls_image_path=None):
 
-    image_transform = get_image_transform(images_path)
+    train_image_transform = get_image_transform(images_path, augmentation=augmentation)
+    test_val_image_transform = get_image_transform(images_path, augmentation=False)
 
     train_annotations, val_annotations, test_annotations = geospatial_data_split(pd.read_csv(annotations_path))
 
@@ -173,7 +192,7 @@ def get_datasets(annotations_path,
         majority_label_rows_only=majority_label_only, #Only use rows where one class has more votes than any other
         single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
         undersample=undersample, #If True, class balance is forced by only using as many examples from each class that the rarest class has
-        transform=image_transform)
+        transform=train_image_transform)
 
     print("\nProcessing validation dataset")
     val_dataset = GeoWikiDataset(
@@ -183,7 +202,7 @@ def get_datasets(annotations_path,
         drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
         majority_label_rows_only=True, #This is false for evaluation in order to compute statistics like Prec/Recall/F1-score 
         single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
-        transform=image_transform)
+        transform=test_val_image_transform)
 
     print("\nProcessing test dataset")
     test_dataset = GeoWikiDataset(
@@ -193,7 +212,7 @@ def get_datasets(annotations_path,
         drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
         majority_label_rows_only=True, #This is false for evaluation in order to compute statistics like Prec/Recall/F1-score 
         single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
-        transform=image_transform)
+        transform=test_val_image_transform)
 
     #I think technically i should only use the train dataset to get class counts
     #TODO: weights not implemented because get_class_counts() currently 
@@ -215,7 +234,7 @@ def get_datasets(annotations_path,
             drop_rows_with_nan_data=True, 
             majority_label_rows_only=True, #This is false for evaluation in order to compute statistics like Prec/Recall/F1-score 
             single_label_rows_only=True,
-            transform=image_transform)
+            transform=test_val_image_transform)
     else:
         controls_dataset = None
 
