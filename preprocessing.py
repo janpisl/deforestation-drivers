@@ -11,6 +11,8 @@ import os
 import pandas as pd
 import numpy as np
 from shapely.geometry import box
+import imgaug as ia
+import imgaug.augmenters as iaa
 
 
 CLASSES = ['Subsistence agriculture', 'Managed forest/forestry',
@@ -32,7 +34,7 @@ def has_majority_label(df):
         pd.Series: rows with a single top voted answers are set to True
     """
     df = df.set_index('sampleid')
-    df['most_votes'] = df.max(axis=1)
+    df['most_votes'] = df.drop([col for col in df.columns if col not in CLASSES], axis=1).max(axis=1)
     df['second_most_votes'] = df.drop([col for col in df.columns if col not in CLASSES], axis=1).apply(lambda row: row.nlargest(2).values[-1],axis=1)
 
     return (df.most_votes > df.second_most_votes).reset_index(drop=True)
@@ -132,10 +134,6 @@ def fix_naming(image_folder, output_folder, gdf_labels_path='data/campaign_label
 
 
 
-
-
-
-
 if __name__ == '__main__':
 
 
@@ -178,11 +176,22 @@ if __name__ == '__main__':
 
 
 
-    folder = 'data/tmp/renamed_medians'
+    '''folder = 'data/tmp/renamed_medians'
     annotations = 'data/tmp/annotations_with_majority_class.csv'
     
     img_labels = pd.read_csv(annotations)
     existing_files = img_labels.loc[file_exists(img_labels, folder)]
     x = has_missing_data(existing_files, folder)
+    pdb.set_trace()
+    print()'''
+
+
+    path = 'data/labels/campaign_labels_processed.csv'
+    img_labels = pd.read_csv(path)
+
+    folder = "data/seco/L8/campaign/2020/annual/medians"
+    existing_files = img_labels.loc[file_exists(img_labels, folder)].reset_index(drop=True)
+    single_label_only = existing_files.loc[has_single_label(existing_files)].reset_index(drop=True)
+    valid_only = single_label_only.loc[~has_missing_data(single_label_only, folder)].reset_index(drop=True)
     pdb.set_trace()
     print()
