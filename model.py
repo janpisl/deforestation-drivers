@@ -41,7 +41,7 @@ class ResidualBlock(nn.Module):
 
 
 class ResNet18(nn.Module):
-    def __init__(self, in_channels, classes, output_sigmoid):
+    def __init__(self, in_channels, classes, output_sigmoid=False, output_softmax=False):
         super(ResNet18,self).__init__()
         
         self.block1 = nn.Sequential(
@@ -67,7 +67,9 @@ class ResNet18(nn.Module):
         self.output_sigmoid = output_sigmoid
         if self.output_sigmoid:
             self.sigmoid = nn.Sigmoid()
-        
+
+        self.output_softmax = output_softmax
+
     def forward(self,x):
         x = self.block1(x)
         x = self.block2(x)
@@ -79,11 +81,12 @@ class ResNet18(nn.Module):
 
         if self.output_sigmoid:
             x = self.sigmoid(x)
+        
+        if self.output_softmax:
+            assert self.output_sigmoid is False
+            x = torch.nn.functional.log_softmax(x, dim=1)
 
         return x
-
-
-
 
 
 def get_resnet18_pytorch(in_channels=7, output_classes=9):
@@ -97,65 +100,9 @@ def get_resnet18_pytorch(in_channels=7, output_classes=9):
                           padding=net.conv1.padding,
                           bias=False)
 
-    '''net.layer2[0].conv1 = nn.Conv2d(net.layer2[0].conv1.in_channels, 
-                                    net.layer2[0].conv1.out_channels, 
-                                    kernel_size=net.layer2[0].conv1.kernel_size, 
-                                    stride=(1,1), 
-                                    padding=net.layer2[0].conv1.padding,
-                                    bias=net.layer2[0].conv1.bias)   
-
-    net.layer2[0].downsample[0] = nn.Conv2d(net.layer2[0].downsample[0].in_channels, 
-                                    net.layer2[0].downsample[0].out_channels, 
-                                    kernel_size=net.layer2[0].downsample[0].kernel_size, 
-                                    stride=(1,1), 
-                                    padding=net.layer2[0].downsample[0].padding,
-                                    bias=net.layer2[0].downsample[0].bias)  
-
-
-    #layer3
-    net.layer3[0].conv1 = nn.Conv2d(net.layer3[0].conv1.in_channels, 
-                                    net.layer3[0].conv1.out_channels, 
-                                    kernel_size=net.layer3[0].conv1.kernel_size, 
-                                    stride=(1,1), 
-                                    padding=net.layer3[0].conv1.padding,
-                                    bias=net.layer3[0].conv1.bias)   
-
-    net.layer3[0].downsample[0] = nn.Conv2d(net.layer3[0].downsample[0].in_channels, 
-                                            net.layer3[0].downsample[0].out_channels, 
-                                            kernel_size=net.layer3[0].downsample[0].kernel_size, 
-                                            stride=(1,1), 
-                                            padding=net.layer3[0].downsample[0].padding,
-                                            bias=net.layer3[0].downsample[0].bias)  
-
-    #layer4
-    net.layer4[0].conv1 = nn.Conv2d(net.layer4[0].conv1.in_channels, 
-                                    net.layer4[0].conv1.out_channels, 
-                                    kernel_size=net.layer4[0].conv1.kernel_size, 
-                                    stride=(1,1), 
-                                    padding=net.layer4[0].conv1.padding,
-                                    bias=net.layer4[0].conv1.bias)   
-
-    net.layer4[0].downsample[0] = nn.Conv2d(net.layer4[0].downsample[0].in_channels, 
-                                            net.layer4[0].downsample[0].out_channels, 
-                                            kernel_size=net.layer4[0].downsample[0].kernel_size, 
-                                            stride=(1,1), 
-                                            padding=net.layer4[0].downsample[0].padding,
-                                            bias=net.layer4[0].downsample[0].bias)'''  
-    
-    
-    net.layer2[0].conv1.stride = (1,1)
-    net.layer2[0].downsample[0].stride = (1,1)
-    net.layer3[0].conv1.stride = (1,1)
-    net.layer3[0].downsample[0].stride = (1,1)
-    net.layer4[0].conv1.stride = (1,1)
-    net.layer4[0].downsample[0].stride = (1,1)
-
     net.fc = nn.Linear(512, out_features=output_classes, bias = True)
 
     return net
-
-
-
 
 
 import torch.nn as nn
@@ -181,3 +128,30 @@ class TestNet(nn.Module):
         x = self.fc3(x)
         return x
 
+
+
+class Net(nn.Module):
+    """Adapted from PyTorch MNIST tutorial on GitHub"""
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(7, 64, 3, 1)
+        self.conv2 = nn.Conv2d(64, 64, 3, 1)
+        self.dropout1 = nn.Dropout(0.25)
+        self.dropout2 = nn.Dropout(0.5)
+        self.fc1 = nn.Linear(12544, 128)
+        self.fc2 = nn.Linear(128, 9)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+        x = self.dropout1(x)
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.dropout2(x)
+        x = self.fc2(x)
+        #output = F.log_softmax(x, dim=1)
+        return x

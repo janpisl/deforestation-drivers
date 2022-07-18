@@ -1,6 +1,8 @@
 import os
 import pdb
 
+
+import torch
 from imgaug import augmenters as iaa
 import torchvision
 import utm
@@ -67,6 +69,10 @@ class GeoWikiDataset(Dataset):
             self.img_labels = self.img_labels.loc[~has_missing_data(self.img_labels, img_dir)].reset_index(drop=True)
             print(f'Dropped {size - len(self.img_labels)} rows where the corresponding file contained missing data. Rows remaining: {len(self.img_labels)}')  
 
+
+        #Randomly swapping labels as a sanity check
+        #self.img_labels['sampleid'] = self.img_labels[['sampleid']].sample(frac=1).reset_index(drop=True)
+                
         self.img_dir = img_dir
         self.transform = transform
         self.target_transform = target_transform
@@ -80,7 +86,7 @@ class GeoWikiDataset(Dataset):
         img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx]['filename'])
         with rasterio.open(img_path) as source:
             image = Tensor(source.read())
-
+        
         labels = self.img_labels.iloc[idx].to_dict()
         if self.transform:
             image = self.transform(image)
@@ -88,17 +94,25 @@ class GeoWikiDataset(Dataset):
             labels = self.target_transform(labels)
 
         labels = Tensor([value for key, value in labels.items() if key in CLASSES])
+        
+        #This is how i tried to feed the model the label as input
+        #image[:,:,:] = torch.argmax(labels).item()
 
-        return image, labels
+        # only using RGB bands 
+        #image = image[1:4,:,:]
+
+        return image, torch.argmax(labels)
 
 
 def get_balanced_classes(df):
     
     labels = df.drop([col for col in df.columns if col not in CLASSES], axis=1)
     classes, counts = np.unique(labels.idxmax(axis=1), return_counts=True)
-    min_count = 10
+
+    #min_count = 5
+    min_count = counts.min()
+
     print(f"Using {min_count} examples per class.")
-    #min_count = counts.min()
     indices = []
     for _class in CLASSES:
         try:
@@ -202,6 +216,7 @@ def get_datasets(annotations_path,
         drop_rows_with_nan_data=drop_missing_vals, #Drop row if any pixel in corresp. image has 0s across all bands
         majority_label_rows_only=True, #This is false for evaluation in order to compute statistics like Prec/Recall/F1-score 
         single_label_rows_only=single_label_only, #Only use rows where all votes are for one class
+        #undersample=undersample, #If True, class balance is forced by only using as many examples from each class that the rarest class has
         transform=test_val_image_transform)
 
     print("\nProcessing test dataset")
