@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from torch import manual_seed
-
+import torch
 import pdb
 
 
@@ -61,9 +61,13 @@ def compute_eval_loss(dataloader, net, criterion, device):
         inputs, targets = inputs.to(device), targets.to(device)
         output = net(inputs)
         output = output.to(device)
-        targets = targets/targets.sum(axis=1, keepdims=True).float()
-        loss = criterion(output, targets.float())
+        output = torch.nn.functional.log_softmax(output, dim=1)
+        #targets = targets/targets.sum(axis=1, keepdims=True).float()
+        loss = criterion(output, targets)
 
         test_loss += loss.item()
     
     return test_loss
+
+
+
